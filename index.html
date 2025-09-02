@@ -1,6 +1,204 @@
 <!DOCTYPE html>
-<html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>議事録作成ツール</title>
+    <link rel="stylesheet" href="style.css">
+</head>
 <body>
-    <h1>Static Web Apps is working!</h1>
+    <header class="header">
+        <div class="header-left">
+            <button class="menu-toggle" id="menu-toggle">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path d="M3 12h18M3 6h18M3 18h18" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </button>
+            <div class="logo">Meeting Minutes</div>
+        </div>
+        <div class="header-right">
+            <div class="user-menu" id="logged-in-user" style="display: none;">
+                <div class="user-avatar" id="user-avatar"></div>
+                <span class="user-name" id="user-name"></span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </div>
+            <a href="/.auth/logout" class="btn btn-secondary" id="logout-btn" style="display: none;">
+                ログアウト
+            </a>
+        </div>
+    </header>
+
+    <div class="app-container">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-content">
+                <nav class="nav-section">
+                    <div class="nav-section-title">メイン</div>
+                    <a href="#" class="nav-item active" data-target="create">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M12 5v14M5 12h14" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        新規作成
+                    </a>
+                    <a href="#" class="nav-item" data-target="list">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M9 11H3m6 4H3m6 4H3M13 5h8m-8 4h8m-8 4h8m-8 4h8" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        議事録一覧
+                    </a>
+                </nav>
+
+                <nav class="nav-section">
+                    <div class="nav-section-title">管理</div>
+                    <a href="#" class="nav-item">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        設定
+                    </a>
+                    <a href="#" class="nav-item">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <circle cx="12" cy="12" r="10" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M12 17h.01" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        ヘルプ
+                    </a>
+                </nav>
+            </div>
+        </aside>
+
+        <div class="overlay" id="overlay"></div>
+
+        <main class="main-content">
+            <div id="create-section" class="content-wrapper active-section">
+                <div class="page-header">
+                    <h1 class="page-title">新規議事録作成</h1>
+                    <p class="page-description">音声・動画ファイルをアップロードして、自動的に議事録を生成します</p>
+                </div>
+
+                <div class="upload-container">
+                    <div class="upload-dropzone" id="upload-dropzone">
+                        <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        <h3 class="upload-title">ファイルをドラッグ＆ドロップ</h3>
+                        <p class="upload-description">または、クリックしてファイルを選択</p>
+                        <button class="btn btn-primary" id="file-select-btn">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                            ファイルを選択
+                        </button>
+                        <p class="supported-formats">対応形式: MP3, MP4, WAV, M4A, AAC, OGG, WebM (最大500MB)</p>
+                        <input type="file" id="file-input" style="display: none;" accept="audio/*,video/*">
+                    </div>
+                </div>
+
+                <div class="progress-card" id="progress-card" style="display: none;">
+                    <div class="progress-header">
+                        <div class="progress-spinner"></div>
+                        <span class="progress-title">音声を文字起こし中...</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                    <p class="progress-text">処理時間は音声の長さによって異なります（通常1-5分）</p>
+                </div>
+            </div>
+
+            <div id="list-section" class="content-wrapper">
+                <div class="page-header">
+                    <h1 class="page-title">議事録一覧</h1>
+                    <p class="page-description">作成済みの議事録を管理・編集できます</p>
+                </div>
+
+                <div class="table-container">
+                    <div class="table-header">
+                        <h2 class="table-title">最近の議事録</h2>
+                        <div class="search-container">
+                            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <circle cx="11" cy="11" r="8" stroke-linecap="round" stroke-linejoin="round"/>
+                                <path d="m21 21-4.35-4.35" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                            <input type="text" class="search-input" placeholder="議事録を検索...">
+                        </div>
+                    </div>
+
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>タイトル</th>
+                                <th>作成日時</th>
+                                <th>時間</th>
+                                <th>ステータス</th>
+                                <th>アクション</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="stroke: var(--text-tertiary);">
+                                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke-linecap="round" stroke-linejoin="round"/>
+                                            <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" stroke-linecap="round" stroke-linejoin="round"/>
+                                        </svg>
+                                        営業会議_2024年12月
+                                    </div>
+                                </td>
+                                <td>2024/12/15 14:30</td>
+                                <td>45分</td>
+                                <td>
+                                    <span class="status-badge completed">
+                                        <span class="status-dot"></span>
+                                        完了
+                                    </span>
+                                </td>
+                                <td>
+                                    <div class="table-actions">
+                                        <button class="btn-small">表示</button>
+                                        <button class="btn-small">編集</button>
+                                        <button class="btn-small">ダウンロード</button>
+                                        <button class="btn-small">削除</button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="stroke: var(--text-tertiary);">
+                                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke-linecap="round" stroke-linejoin="round"/>
+                                            <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" stroke-linecap="round" stroke-linejoin="round"/>
+                                        </svg>
+                                        プロジェクトキックオフ
+                                    </div>
+                                </td>
+                                <td>2024/12/10 10:00</td>
+                                <td>90分</td>
+                                <td>
+                                    <span class="status-badge completed">
+                                        <span class="status-dot"></span>
+                                        完了
+                                    </span>
+                                </td>
+                                <td>
+                                    <div class="table-actions">
+                                        <button class="btn-small">表示</button>
+                                        <button class="btn-small">編集</button>
+                                        <button class="btn-small">ダウンロード</button>
+                                        <button class="btn-small">削除</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="script.js"></script>
 </body>
 </html>
