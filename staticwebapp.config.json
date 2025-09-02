@@ -1,0 +1,48 @@
+{
+  "routes": [
+    {
+      "route": "/api/RequestTranscription",
+      "allowedRoles": ["anonymous"]
+    },
+    {
+      "route": "/index.html",
+      "allowedRoles": ["anonymous", "authenticated"]
+    },
+    {
+      "route": "/style.css",
+      "allowedRoles": ["anonymous", "authenticated"]
+    },
+    {
+      "route": "/script.js",
+      "allowedRoles": ["anonymous", "authenticated"]
+    },
+    {
+      "route": "/login.html",
+      "allowedRoles": ["anonymous"]
+    },
+    {
+      "route": "/login-style.css",
+      "allowedRoles": ["anonymous"]
+    },
+    {
+      "route": "/api/*",
+      "allowedRoles": ["authenticated"]
+    },
+    {
+      "route": "/.auth/login/aad",
+      "statusCode": 404
+    },
+    {
+      "route": "/*",
+      "allowedRoles": ["authenticated"],
+      "rewrite": "/index.html"
+    }
+  ],
+  "navigationFallback": {
+    "rewrite": "/login.html",
+    "exclude": ["/images/*", "/css/*"]
+  },
+  "platform": {
+    "apiRuntime": "python:3.10"
+  }
+}
