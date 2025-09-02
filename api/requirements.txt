@@ -3,4 +3,4 @@ azure-storage-blob
 requests
 openai
 ffmpeg-python
-azure-ai-speech
+azure-cognitiveservices-speech
