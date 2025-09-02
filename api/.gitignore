@@ -1,0 +1,8 @@
+# /api/.gitignore
+
+.vscode/
+.venv/
+__pycache__/
+*.pyc
+local.settings.json
+.pytest_cache
