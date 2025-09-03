@@ -1,5 +1,5 @@
 azure-functions
-azure-storage-blob
-requests
-openai
-azure-cognitiveservices-speech
+#azure-storage-blob
+#requests
+#openai
+#azure-cognitiveservices-speech
