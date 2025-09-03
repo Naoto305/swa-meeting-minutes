@@ -1,7 +1,11 @@
 {
   "routes": [
     {
-      "route": "/api/RequestTranscription",
+      "route": "/api/transcribe",
+      "allowedRoles": ["anonymous"]
+    },
+    {
+      "route": "/api/generate",
       "allowedRoles": ["anonymous"]
     },
     {
@@ -46,3 +50,4 @@
     "apiRuntime": "python:3.10"
   }
 }
+
