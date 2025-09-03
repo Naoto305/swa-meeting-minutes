@@ -97,7 +97,7 @@ def transcribe_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
                     logging.error("Destination container SAS URL is not configured.")
                     return func.HttpResponse("Server configuration error.", status_code=500)
 
-                transcription_endpoint = f"{speech_endpoint}/speechtotext/v3.1/transcriptions"
+                transcription_endpoint = f"{speech_endpoint.rstrip('/')}/speechtotext/v3.1/transcriptions"
 
                 payload = {
                     "contentUrls": [blob_url],
