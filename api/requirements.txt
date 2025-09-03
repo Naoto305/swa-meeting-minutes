@@ -2,5 +2,4 @@ azure-functions
 azure-storage-blob
 requests
 openai
-ffmpeg-python
 azure-cognitiveservices-speech

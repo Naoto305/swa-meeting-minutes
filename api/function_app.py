@@ -3,16 +3,10 @@ import logging
 import json
 import os
 import requests
-import ffmpeg
-import tempfile
 import uuid
 from datetime import datetime, timedelta
 from azure.storage.blob import (
-    BlobServiceClient,
-    generate_container_sas,
-    ContainerSasPermissions,
-    generate_blob_sas,
-    BlobSasPermissions
+    BlobServiceClient
 )
 import openai
 
@@ -28,48 +22,32 @@ def upload_http_trigger(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function processed an upload request.')
 
     try:
-        # --- Authentication (remains the same) ---
+        # --- Authentication ---
         auth_header = req.headers.get('X-MS-CLIENT-PRINCIPAL')
         if not auth_header:
             return func.HttpResponse("Unauthorized: User not authenticated.", status_code=401)
         
         # --- Get File and Prompt ---
         file = req.files.get('file')
-        prompt = req.form.get('prompt', '議事録を要約してください。') # Default prompt
+        prompt = req.form.get('prompt', '議事録を要約してください。')
         if not file:
-            return func.HttpResponse("Please provide a file in the request.", status_code=400)
-
-        # --- Audio Extraction ---
-        original_filename = file.filename
-        temp_dir = tempfile.gettempdir()
-        input_path = os.path.join(temp_dir, original_filename)
-        
-        # Save uploaded file temporarily
-        with open(input_path, "wb") as f:
-            f.write(file.read())
-        
-        # Prepare output path for audio
-        base_name, _ = os.path.splitext(original_filename)
-        audio_filename = f"{base_name}_{uuid.uuid4()}.mp3"
-        output_path = os.path.join(temp_dir, audio_filename)
-
-        logging.info(f"Extracting audio from {original_filename} to {audio_filename}")
-        try:
-            ffmpeg.input(input_path).output(output_path, acodec='libmp3lame', audio_bitrate='128k').run(overwrite_output=True, quiet=True)
-            logging.info("Audio extraction successful.")
-        except ffmpeg.Error as e:
-            logging.error(f"FFmpeg error: {e.stderr.decode('utf8') if e.stderr else 'Unknown error'}")
-            return func.HttpResponse("Failed to process video/audio file.", status_code=500)
+            return func.HttpResponse("Please provide an audio file in the request.", status_code=400)
 
         # --- Upload to Azure Storage with Metadata ---
+        original_filename = file.filename
+        # Create a unique name for the blob to avoid overwrites
+        base_name, extension = os.path.splitext(original_filename)
+        audio_filename = f"{base_name}_{uuid.uuid4()}{extension}"
+
         connect_str = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
         blob_service_client = BlobServiceClient.from_connection_string(connect_str)
         
         blob_client = blob_service_client.get_blob_client(container=AUDIO_CONTAINER, blob=audio_filename)
         
         logging.info(f"Uploading {audio_filename} to container {AUDIO_CONTAINER}.")
-        with open(output_path, "rb") as data:
-            blob_client.upload_blob(data, overwrite=True)
+        # Get file content from the stream
+        file_content = file.read()
+        blob_client.upload_blob(file_content, overwrite=True)
 
         # Save prompt and original filename in metadata
         metadata = {
@@ -79,12 +57,8 @@ def upload_http_trigger(req: func.HttpRequest) -> func.HttpResponse:
         blob_client.set_blob_metadata(metadata)
         logging.info(f"Metadata set for {audio_filename}.")
 
-        # --- Cleanup temporary files ---
-        os.remove(input_path)
-        os.remove(output_path)
-
         return func.HttpResponse(
-            json.dumps({'message': f'File processed and {audio_filename} uploaded successfully. Transcription will begin shortly.'}),
+            json.dumps({'message': f'Audio file {original_filename} uploaded as {audio_filename}. Transcription will begin shortly.'}),
             mimetype="application/json",
             status_code=202 # Accepted
         )
@@ -120,13 +94,11 @@ def transcribe_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
                     logging.error("Speech service credentials are not configured.")
                     return func.HttpResponse("Server configuration error.", status_code=500)
 
-                # The destination container URL with SAS must be provided as an environment variable
                 destination_container_url = os.environ.get("TRANSCRIPTION_DESTINATION_CONTAINER_SAS_URL")
                 if not destination_container_url:
                     logging.error("Destination container SAS URL is not configured.")
                     return func.HttpResponse("Server configuration error.", status_code=500)
 
-                # The batch transcription API endpoint
                 transcription_endpoint = f"{speech_endpoint}/speechtotext/v3.1/transcriptions"
 
                 payload = {
@@ -136,6 +108,7 @@ def transcribe_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
                     "properties": {
                         "diarizationEnabled": True,
                         "wordLevelTimestampsEnabled": True,
+                        "destinationContainerUrl": destination_container_url
                     },
                 }
                 
@@ -144,15 +117,8 @@ def transcribe_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
                     "Content-Type": "application/json"
                 }
 
-                # The REST API for creating a transcription requires the destination to be set
-                # in the 'links' part of the response, not in the initial payload.
-                # We first create the transcription job, then get the 'files' URL from the response
-                # and upload the destination there. A simpler way is to use the destinationContainerUrl.
-                # Let's add it back to properties.
-                payload["properties"]["destinationContainerUrl"] = destination_container_url
-
                 response = requests.post(transcription_endpoint, headers=headers, data=json.dumps(payload))
-                response.raise_for_status() # Raise an exception for bad status codes
+                response.raise_for_status()
 
                 logging.info(f"Successfully submitted transcription request for {source_blob_name}. Location: {response.headers.get('Location')}")
 
@@ -167,14 +133,11 @@ def transcribe_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
         logging.error(f"An error occurred in transcribe_eventgrid_trigger: {e}")
         return func.HttpResponse("An error occurred while processing the event.", status_code=500)
 
-# --- Placeholder for the next function ---
+
 @app.route(route="generate")
 def generate_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python Event Grid trigger function processed a request for generation.')
-    # This function will be implemented in the next step.
-    # It will handle validation and process BlobCreated events from the transcripts container.
     
-    # Dummy implementation for now
     try:
         events = req.get_json()
         for event in events:
