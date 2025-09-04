@@ -33,7 +33,7 @@ def upload_http_trigger(req: func.HttpRequest) -> func.HttpResponse:
         
         # --- Get File and Prompt ---
         file = req.files.get('file')
-        prompt = req.form.get('prompt', '議事録を要約してください。')
+        prompt = req.form.get('prompt', '議事録を日本語で要約してください。')
         if not file:
             return func.HttpResponse("Please provide an audio file in the request.", status_code=400)
 
