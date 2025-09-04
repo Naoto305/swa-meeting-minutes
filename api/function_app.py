@@ -4,6 +4,7 @@ import json
 import os
 import requests
 import uuid
+import base64
 from azure.storage.blob import (
     BlobServiceClient
 )
@@ -47,10 +48,13 @@ def upload_http_trigger(req: func.HttpRequest) -> func.HttpResponse:
         file_content = file.read()
         blob_client.upload_blob(file_content, overwrite=True)
 
-        # Save prompt and original filename in metadata
+        # Base64 encode metadata values to handle non-ASCII characters
+        prompt_b64 = base64.b64encode(prompt.encode('utf-8')).decode('ascii')
+        filename_b64 = base64.b64encode(original_filename.encode('utf-8')).decode('ascii')
+
         metadata = {
-            "original_prompt": prompt,
-            "original_filename": original_filename
+            "original_prompt_b64": prompt_b64,
+            "original_filename_b64": filename_b64
         }
         blob_client.set_blob_metadata(metadata)
         logging.info(f"Metadata set for {audio_filename}.")
