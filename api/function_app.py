@@ -178,8 +178,6 @@ def generate_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
 
                 # Correctly parse the full blob name (including virtual directories) from the URL
                 blob_path = urllib.parse.urlparse(transcript_blob_url).path
-                # The path looks like /<container-name>/<blob-name-with-folders>.
-                # We split it once on the container name to get the part after it.
                 transcript_blob_name = blob_path.split(f"/{TRANSCRIPTS_CONTAINER}/", 1)[1]
 
                 # Only process the detailed transcription result file
@@ -238,11 +236,14 @@ def generate_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
                 generated_minutes = response.choices[0].message.content
                 logging.info("Successfully generated minutes from OpenAI.")
 
-                # --- Save the final minutes to storage (using the audio service client is fine here, as it's the primary) ---
+                # --- Save the final minutes to the MINUTES storage account ---
+                minutes_connect_str = os.getenv('MINUTES_STORAGE_CONNECTION_STRING')
+                minutes_blob_service_client = BlobServiceClient.from_connection_string(minutes_connect_str)
+
                 minutes_base_name, _ = os.path.splitext(original_filename)
                 minutes_filename = f"{minutes_base_name}_minutes.txt"
                 
-                minutes_blob_client = audio_blob_service_client.get_blob_client(container=MINUTES_CONTAINER, blob=minutes_filename)
+                minutes_blob_client = minutes_blob_service_client.get_blob_client(container=MINUTES_CONTAINER, blob=minutes_filename)
                 minutes_blob_client.upload_blob(generated_minutes.encode('utf-8'), overwrite=True)
                 logging.info(f"Successfully uploaded final minutes to {minutes_filename} in container {MINUTES_CONTAINER}.")
 
@@ -251,6 +252,7 @@ def generate_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         logging.error(f"An error occurred in generate_eventgrid_trigger: {e}", exc_info=True)
         return func.HttpResponse("An error occurred while processing the generation event.", status_code=500)
+
 
 
 
