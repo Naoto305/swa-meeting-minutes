@@ -176,9 +176,14 @@ def generate_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
                 transcript_blob_url = event['data']['url']
                 logging.info(f"Processing transcript blob: {transcript_blob_url}")
 
+                # Correctly parse the full blob name (including virtual directories) from the URL
+                blob_path = urllib.parse.urlparse(transcript_blob_url).path
+                # The path looks like /<container-name>/<blob-name-with-folders>.
+                # We split it once on the container name to get the part after it.
+                transcript_blob_name = blob_path.split(f"/{TRANSCRIPTS_CONTAINER}/", 1)[1]
+
                 # Only process the detailed transcription result file
-                transcript_blob_name = os.path.basename(transcript_blob_url)
-                if not transcript_blob_name.startswith('contenturl_'):
+                if not os.path.basename(transcript_blob_name).startswith('contenturl_'):
                     logging.info("Skipping blob as it is not a detailed transcript file.")
                     continue
 
@@ -233,7 +238,7 @@ def generate_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
                 generated_minutes = response.choices[0].message.content
                 logging.info("Successfully generated minutes from OpenAI.")
 
-                # --- Save the final minutes to storage (using the audio service client) ---
+                # --- Save the final minutes to storage (using the audio service client is fine here, as it's the primary) ---
                 minutes_base_name, _ = os.path.splitext(original_filename)
                 minutes_filename = f"{minutes_base_name}_minutes.txt"
                 
@@ -246,5 +251,6 @@ def generate_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         logging.error(f"An error occurred in generate_eventgrid_trigger: {e}", exc_info=True)
         return func.HttpResponse("An error occurred while processing the generation event.", status_code=500)
+
 
 
