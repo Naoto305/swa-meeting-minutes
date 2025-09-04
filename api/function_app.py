@@ -5,8 +5,11 @@ import os
 import requests
 import uuid
 import base64
+from datetime import datetime, timedelta
 from azure.storage.blob import (
-    BlobServiceClient
+    BlobServiceClient,
+    generate_blob_sas,
+    BlobSasPermissions
 )
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
@@ -90,6 +93,23 @@ def transcribe_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
                 blob_url = event['data']['url']
                 source_blob_name = os.path.basename(blob_url)
 
+                # --- Generate SAS token for the source blob ---
+                connect_str = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
+                blob_service_client = BlobServiceClient.from_connection_string(connect_str)
+                
+                sas_token = generate_blob_sas(
+                    account_name=blob_service_client.account_name,
+                    container_name=AUDIO_CONTAINER,
+                    blob_name=source_blob_name,
+                    account_key=blob_service_client.credential.account_key,
+                    permission=BlobSasPermissions(read=True),
+                    expiry=datetime.utcnow() + timedelta(hours=1) # 1-hour validity
+                )
+                
+                blob_url_with_sas = f"{blob_url}?{sas_token}"
+                logging.info(f"Generated SAS URL for source blob: {blob_url_with_sas}")
+
+                # --- Call Speech Service ---
                 speech_api_key = os.environ.get("SPEECH_KEY")
                 speech_endpoint = os.environ.get("SPEECH_ENDPOINT")
                 if not all([speech_api_key, speech_endpoint]):
@@ -104,7 +124,7 @@ def transcribe_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
                 transcription_endpoint = f"{speech_endpoint.rstrip('/')}/speechtotext/v3.1/transcriptions"
 
                 payload = {
-                    "contentUrls": [blob_url],
+                    "contentUrls": [blob_url_with_sas],
                     "locale": "ja-JP",
                     "displayName": f"transcription-{source_blob_name}",
                     "properties": {
