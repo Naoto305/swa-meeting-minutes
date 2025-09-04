@@ -5,12 +5,14 @@ import os
 import requests
 import uuid
 import base64
+import urllib.parse
 from datetime import datetime, timedelta
 from azure.storage.blob import (
     BlobServiceClient,
     generate_blob_sas,
     BlobSasPermissions
 )
+from openai import AzureOpenAI
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
@@ -159,18 +161,82 @@ def transcribe_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="generate")
 def generate_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python Event Grid trigger function processed a request for generation.')
-    
+
     try:
         events = req.get_json()
         for event in events:
-            if event.get('eventType') == 'Microsoft.EventGrid.SubscriptionValidationEvent':
+            event_type = event.get('eventType')
+            
+            if event_type == 'Microsoft.EventGrid.SubscriptionValidationEvent':
                 validation_code = event['data']['validationCode']
                 logging.info(f"Got validation event for generate. Responding with code: {validation_code}")
                 return func.HttpResponse(json.dumps({"validationResponse": validation_code}), mimetype="application/json")
-            else:
-                logging.info(f"Received event for generation: {event.get('eventType')}")
+
+            if event_type == 'Microsoft.Storage.BlobCreated':
+                transcript_blob_url = event['data']['url']
+                logging.info(f"Processing transcript blob: {transcript_blob_url}")
+
+                # Only process the detailed transcription result file
+                if not os.path.basename(transcript_blob_url).startswith('contenturl_'):
+                    logging.info("Skipping blob as it is not a detailed transcript file.")
+                    continue
+
+                # --- Read the transcription result ---
+                connect_str = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
+                blob_service_client = BlobServiceClient.from_connection_string(connect_str)
+                
+                transcript_blob_client = blob_service_client.get_blob_client_from_url(transcript_blob_url)
+                transcript_data = transcript_blob_client.download_blob().readall()
+                transcript_json = json.loads(transcript_data)
+
+                transcript_text = transcript_json['combinedRecognizedPhrases'][0]['display']
+                original_audio_url = transcript_json['source']
+
+                # --- Get metadata from original audio blob ---
+                parsed_url = urllib.parse.urlparse(original_audio_url)
+                original_audio_blob_name = os.path.basename(parsed_url.path)
+                
+                audio_blob_client = blob_service_client.get_blob_client(container=AUDIO_CONTAINER, blob=original_audio_blob_name)
+                audio_metadata = audio_blob_client.get_blob_properties().metadata
+
+                # --- Decode metadata ---
+                user_prompt = base64.b64decode(audio_metadata['original_prompt_b64']).decode('utf-8')
+                original_filename = base64.b64decode(audio_metadata['original_filename_b64']).decode('utf-8')
+
+                logging.info(f"Successfully retrieved transcript and metadata for {original_filename}.")
+
+                # --- Call Azure OpenAI ---
+                openai_client = AzureOpenAI(
+                    azure_endpoint=os.environ.get("OPENAI_API_BASE"),
+                    api_key=os.environ.get("OPENAI_API_KEY"),
+                    api_version="2024-02-01" # Use a recent, stable version
+                )
+
+                system_prompt = "You are an expert assistant skilled at creating concise and accurate meeting minutes from a transcription. Structure the output clearly with headings like 'Summary', 'Action Items', and 'Decisions'."
+                final_prompt = f"Please create meeting minutes based on the following transcription and user prompt.\n\nUser Prompt: {user_prompt}\n\nTranscription:\n\n{transcript_text}"
+
+                response = openai_client.chat.completions.create(
+                    model=os.environ.get("OPENAI_DEPLOYMENT_NAME"),
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": final_prompt}
+                    ]
+                )
+                
+                generated_minutes = response.choices[0].message.content
+                logging.info("Successfully generated minutes from OpenAI.")
+
+                # --- Save the final minutes to storage ---
+                minutes_base_name, _ = os.path.splitext(original_filename)
+                minutes_filename = f"{minutes_base_name}_minutes.txt"
+                
+                minutes_blob_client = blob_service_client.get_blob_client(container=MINUTES_CONTAINER, blob=minutes_filename)
+                minutes_blob_client.upload_blob(generated_minutes.encode('utf-8'), overwrite=True)
+                logging.info(f"Successfully uploaded final minutes to {minutes_filename} in container {MINUTES_CONTAINER}.")
+
+        return func.HttpResponse("Generation event processed.", status_code=200)
 
     except Exception as e:
-        logging.error(f"Error in generate_eventgrid_trigger: {e}")
+        logging.error(f"An error occurred in generate_eventgrid_trigger: {e}", exc_info=True)
+        return func.HttpResponse("An error occurred while processing the generation event.", status_code=500)
 
-    return func.HttpResponse("Generation endpoint is active but not fully implemented.", status_code=200)
