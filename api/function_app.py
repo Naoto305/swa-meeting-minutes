@@ -177,26 +177,33 @@ def generate_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
                 logging.info(f"Processing transcript blob: {transcript_blob_url}")
 
                 # Only process the detailed transcription result file
-                if not os.path.basename(transcript_blob_url).startswith('contenturl_'):
+                transcript_blob_name = os.path.basename(transcript_blob_url)
+                if not transcript_blob_name.startswith('contenturl_'):
                     logging.info("Skipping blob as it is not a detailed transcript file.")
                     continue
 
-                # --- Read the transcription result ---
-                connect_str = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
-                blob_service_client = BlobServiceClient.from_connection_string(connect_str)
+                # --- Read the transcription result from the TRANSCRIPTS storage account ---
+                transcripts_connect_str = os.getenv('TRANSCRIPTS_STORAGE_CONNECTION_STRING')
+                transcripts_blob_service_client = BlobServiceClient.from_connection_string(transcripts_connect_str)
                 
-                transcript_blob_client = blob_service_client.get_blob_client_from_url(transcript_blob_url)
+                transcript_blob_client = transcripts_blob_service_client.get_blob_client(
+                    container=TRANSCRIPTS_CONTAINER, 
+                    blob=transcript_blob_name
+                )
                 transcript_data = transcript_blob_client.download_blob().readall()
                 transcript_json = json.loads(transcript_data)
 
                 transcript_text = transcript_json['combinedRecognizedPhrases'][0]['display']
                 original_audio_url = transcript_json['source']
 
-                # --- Get metadata from original audio blob ---
+                # --- Get metadata from original audio blob from the AUDIO storage account ---
+                audio_connect_str = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
+                audio_blob_service_client = BlobServiceClient.from_connection_string(audio_connect_str)
+
                 parsed_url = urllib.parse.urlparse(original_audio_url)
                 original_audio_blob_name = os.path.basename(parsed_url.path)
                 
-                audio_blob_client = blob_service_client.get_blob_client(container=AUDIO_CONTAINER, blob=original_audio_blob_name)
+                audio_blob_client = audio_blob_service_client.get_blob_client(container=AUDIO_CONTAINER, blob=original_audio_blob_name)
                 audio_metadata = audio_blob_client.get_blob_properties().metadata
 
                 # --- Decode metadata ---
@@ -226,11 +233,11 @@ def generate_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
                 generated_minutes = response.choices[0].message.content
                 logging.info("Successfully generated minutes from OpenAI.")
 
-                # --- Save the final minutes to storage ---
+                # --- Save the final minutes to storage (using the audio service client) ---
                 minutes_base_name, _ = os.path.splitext(original_filename)
                 minutes_filename = f"{minutes_base_name}_minutes.txt"
                 
-                minutes_blob_client = blob_service_client.get_blob_client(container=MINUTES_CONTAINER, blob=minutes_filename)
+                minutes_blob_client = audio_blob_service_client.get_blob_client(container=MINUTES_CONTAINER, blob=minutes_filename)
                 minutes_blob_client.upload_blob(generated_minutes.encode('utf-8'), overwrite=True)
                 logging.info(f"Successfully uploaded final minutes to {minutes_filename} in container {MINUTES_CONTAINER}.")
 
@@ -239,4 +246,5 @@ def generate_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         logging.error(f"An error occurred in generate_eventgrid_trigger: {e}", exc_info=True)
         return func.HttpResponse("An error occurred while processing the generation event.", status_code=500)
+
 
