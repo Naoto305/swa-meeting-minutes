@@ -256,7 +256,12 @@ def generate_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
 
                 minutes_base_name, _ = os.path.splitext(original_filename)
                 audio_base, _ = os.path.splitext(original_audio_blob_name)
-                minutes_filename = f"{audio_base}_minutes.txt"
+                # Save under virtual folder per user if available
+                user_id = audio_metadata.get('user_id') if isinstance(audio_metadata, dict) else None
+                if user_id:
+                    minutes_filename = f"users/{user_id}/{audio_base}_minutes.txt"
+                else:
+                    minutes_filename = f"{audio_base}_minutes.txt"
                 
                 minutes_blob_client = minutes_blob_service_client.get_blob_client(container=MINUTES_CONTAINER, blob=minutes_filename)
                 # Propagate identity and context metadata from the original audio blob
@@ -304,14 +309,16 @@ def list_minutes(req: func.HttpRequest) -> func.HttpResponse:
         container = blob_service.get_container_client(MINUTES_CONTAINER)
 
         items = []
-        # Include metadata so we can filter by owner without per-blob requests
-        for b in container.list_blobs(include=['metadata']):
+        # List only the current user's folder if available; otherwise list all and filter
+        name_prefix = f"users/{current_user_id}/" if current_user_id else None
+        iterator = container.list_blobs(name_starts_with=name_prefix, include=['metadata']) if name_prefix else container.list_blobs(include=['metadata'])
+        for b in iterator:
             # Only include text files that look like generated minutes
             name = b.name
             if not name.lower().endswith('.txt'):
                 continue
-            # If user filtering is enabled, skip blobs that don't belong to the current user
-            if current_user_id:
+            # If user filtering is enabled (no prefix path match), filter by metadata as a fallback
+            if current_user_id and name_prefix is None:
                 owner = None
                 try:
                     owner = (b.metadata or {}).get('user_id') if hasattr(b, 'metadata') else None
@@ -319,7 +326,8 @@ def list_minutes(req: func.HttpRequest) -> func.HttpResponse:
                     owner = None
                 if owner and owner != current_user_id:
                     continue
-            job_id = name[:-12] if name.endswith('_minutes.txt') and len(name) > len('_minutes.txt') else os.path.splitext(name)[0]
+            base = os.path.basename(name)
+            job_id = base[:-12] if base.endswith('_minutes.txt') and len(base) > len('_minutes.txt') else os.path.splitext(base)[0]
             last_modified = None
             try:
                 # Some SDK versions include last_modified on the list response; fall back if missing
@@ -332,9 +340,10 @@ def list_minutes(req: func.HttpRequest) -> func.HttpResponse:
                 logging.warning(f"Failed to get last_modified for {name}: {e}")
 
             items.append({
-                'name': name,
+                'name': name,               # full blob path
+                'title': base,              # display name only
                 'last_modified': last_modified,
-                'job_id': job_id
+                'job_id': job_id            # derived from base filename
             })
 
         # Sort by last_modified desc if available
@@ -369,7 +378,20 @@ def status(req: func.HttpRequest) -> func.HttpResponse:
         if name:
             blob_name = name
         else:
-            blob_name = f"{job_id}_minutes.txt"
+            # If only job_id is provided, resolve to the current user's folder if available
+            auth_header = req.headers.get('X-MS-CLIENT-PRINCIPAL')
+            current_user_id = None
+            if auth_header:
+                try:
+                    principal_json = base64.b64decode(auth_header).decode('utf-8')
+                    principal = json.loads(principal_json)
+                    current_user_id = principal.get('userId')
+                except Exception as e:
+                    logging.warning(f"Failed to parse client principal in status: {e}")
+            if current_user_id:
+                blob_name = f"users/{current_user_id}/{job_id}_minutes.txt"
+            else:
+                blob_name = f"{job_id}_minutes.txt"
 
         minutes_connect_str = os.getenv('MINUTES_STORAGE_CONNECTION_STRING')
         if not minutes_connect_str:
