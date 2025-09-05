@@ -65,7 +65,7 @@ def upload_http_trigger(req: func.HttpRequest) -> func.HttpResponse:
         logging.info(f"Metadata set for {audio_filename}.")
 
         return func.HttpResponse(
-            json.dumps({'message': f'Audio file {original_filename} uploaded as {audio_filename}. Transcription will begin shortly.'}),
+            json.dumps({'message': f'Audio file {original_filename} uploaded as {audio_filename}. Transcription will begin shortly.', 'job_id': os.path.splitext(audio_filename)[0], 'blob_name': audio_filename}),
             mimetype="application/json",
             status_code=202 # Accepted
         )
@@ -241,7 +241,7 @@ def generate_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
                 minutes_blob_service_client = BlobServiceClient.from_connection_string(minutes_connect_str)
 
                 minutes_base_name, _ = os.path.splitext(original_filename)
-                minutes_filename = f"{minutes_base_name}_minutes.txt"
+                minutes_filename = f"{audio_base}_minutes.txt"
                 
                 minutes_blob_client = minutes_blob_service_client.get_blob_client(container=MINUTES_CONTAINER, blob=minutes_filename)
                 minutes_blob_client.upload_blob(generated_minutes.encode('utf-8'), overwrite=True)
@@ -256,3 +256,69 @@ def generate_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
 
 
 
+
+
+
+@app.route(route="status")
+def status_http_trigger(req: func.HttpRequest) -> func.HttpResponse:
+    try:
+        job_id = req.params.get("job_id")
+        if not job_id:
+            return func.HttpResponse(json.dumps({"error": "missing job_id"}), mimetype="application/json", status_code=400)
+
+        minutes_connect_str = os.getenv('MINUTES_STORAGE_CONNECTION_STRING')
+        minutes_blob_service_client = BlobServiceClient.from_connection_string(minutes_connect_str)
+        minutes_blob_client = minutes_blob_service_client.get_blob_client(container=MINUTES_CONTAINER, blob=f"{job_id}_minutes.txt")
+
+        # Completed?
+        try:
+            data = minutes_blob_client.download_blob().readall()
+            text = data.decode("utf-8", errors="ignore")
+            return func.HttpResponse(json.dumps({"status": "completed", "job_id": job_id, "minutes": text}), mimetype="application/json", status_code=200)
+        except Exception:
+            pass
+
+        # Processing? check audio/transcripts presence
+        audio_connect_str = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
+        audio_bsc = BlobServiceClient.from_connection_string(audio_connect_str)
+        audio_cc = audio_bsc.get_container_client(AUDIO_CONTAINER)
+
+        # If any blob starts with job_id, it's at least uploaded
+        try:
+            found = False
+            for b in audio_cc.list_blobs(name_starts_with=job_id):
+                found = True
+                break
+            if found:
+                return func.HttpResponse(json.dumps({"status": "processing", "job_id": job_id}), mimetype="application/json", status_code=200)
+        except Exception:
+            pass
+
+        return func.HttpResponse(json.dumps({"status": "not_found", "job_id": job_id}), mimetype="application/json", status_code=404)
+    except Exception as e:
+        return func.HttpResponse(json.dumps({"error": str(e)}), mimetype="application/json", status_code=500)
+
+
+
+@app.route(route="list-minutes")
+def list_minutes_http_trigger(req: func.HttpRequest) -> func.HttpResponse:
+    try:
+        minutes_connect_str = os.getenv('MINUTES_STORAGE_CONNECTION_STRING')
+        minutes_bsc = BlobServiceClient.from_connection_string(minutes_connect_str)
+        cc = minutes_bsc.get_container_client(MINUTES_CONTAINER)
+        items = []
+        for b in cc.list_blobs():
+            name = getattr(b, "name", "")
+            if name.endswith("_minutes.txt"):
+                job_id = name[:-len("_minutes.txt")]
+                last_modified = getattr(b, "last_modified", None)
+                items.append({
+                    "name": name,
+                    "job_id": job_id,
+                    "size": getattr(b, "size", None),
+                    "last_modified": last_modified.isoformat() if last_modified else None
+                })
+        items.sort(key=lambda x: x.get("last_modified") or "", reverse=True)
+        return func.HttpResponse(json.dumps({"minutes": items}), mimetype="application/json", status_code=200)
+    except Exception as e:
+        return func.HttpResponse(json.dumps({"error": str(e)}), mimetype="application/json", status_code=500)
