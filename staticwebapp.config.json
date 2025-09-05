@@ -1,36 +1,73 @@
 {
   "routes": [
     {
+      "route": "/api/list-minutes",
+      "allowedRoles": [
+        "authenticated"
+      ]
+    },
+    {
+      "route": "/api/status",
+      "allowedRoles": [
+        "authenticated"
+      ]
+    },
+    {
+      "route": "/api/upload",
+      "allowedRoles": [
+        "authenticated"
+      ]
+    },
+    {
       "route": "/api/transcribe",
-      "allowedRoles": ["anonymous"]
+      "allowedRoles": [
+        "anonymous"
+      ]
     },
     {
       "route": "/api/generate",
-      "allowedRoles": ["anonymous"]
+      "allowedRoles": [
+        "anonymous"
+      ]
     },
     {
       "route": "/index.html",
-      "allowedRoles": ["anonymous", "authenticated"]
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
     },
     {
       "route": "/style.css",
-      "allowedRoles": ["anonymous", "authenticated"]
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
     },
     {
       "route": "/script.js",
-      "allowedRoles": ["anonymous", "authenticated"]
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
     },
     {
       "route": "/login.html",
-      "allowedRoles": ["anonymous"]
+      "allowedRoles": [
+        "anonymous"
+      ]
     },
     {
       "route": "/login-style.css",
-      "allowedRoles": ["anonymous"]
+      "allowedRoles": [
+        "anonymous"
+      ]
     },
     {
       "route": "/api/*",
-      "allowedRoles": ["authenticated"]
+      "allowedRoles": [
+        "authenticated"
+      ]
     },
     {
       "route": "/.auth/login/aad",
@@ -38,16 +75,20 @@
     },
     {
       "route": "/*",
-      "allowedRoles": ["authenticated"],
+      "allowedRoles": [
+        "authenticated"
+      ],
       "rewrite": "/index.html"
     }
   ],
   "navigationFallback": {
     "rewrite": "/login.html",
-    "exclude": ["/images/*", "/css/*"]
+    "exclude": [
+      "/images/*",
+      "/css/*"
+    ]
   },
   "platform": {
     "apiRuntime": "python:3.10"
   }
 }
-

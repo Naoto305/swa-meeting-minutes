@@ -169,3 +169,58 @@ async function handleFileUpload(file) {
         fileInput.value = '';
     }
 }
+
+// ---- Added: realtime-ish status polling & list loader ----
+const minutesCard = document.getElementById('minutes-card');
+const minutesBody = document.getElementById('minutes-body');
+let pollTimer = null;
+
+async function pollStatus(jobId) {
+    try {
+        const r = await fetch(`/api/status?job_id=${encodeURIComponent(jobId)}`);
+        const j = await r.json();
+        if (r.status === 404) return;
+        if (j.status === 'completed') {
+            if (pollTimer) clearInterval(pollTimer);
+            if (minutesBody && minutesCard) {
+                minutesBody.textContent = j.minutes || '';
+                minutesCard.style.display = 'block';
+            }
+        }
+    } catch (e) { console.error(e); }
+}
+
+async function loadMinutesList() {
+    try {
+        const r = await fetch('/api/list-minutes');
+        const j = await r.json();
+        const tbody = document.querySelector('.data-table tbody');
+        if (!tbody) return;
+        tbody.innerHTML = (j.minutes || []).map(m => {
+            const dt = m.last_modified ? new Date(m.last_modified).toLocaleString() : '';
+            return `<tr>
+                <td>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="stroke: var(--text-tertiary);">
+                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        ${m.name}
+                    </div>
+                </td>
+                <td>${dt}</td>
+                <td>-</td>
+                <td><span class="status-badge completed"><span class="status-dot"></span>完了</span></td>
+                <td><div class="table-actions"><button class="btn-small" data-open="${m.job_id}">表示</button></div></td>
+            </tr>`;
+        }).join('');
+        tbody.querySelectorAll('button[data-open]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const id = btn.getAttribute('data-open');
+                if (minutesCard) minutesCard.style.display = 'none';
+                if (minutesBody) minutesBody.textContent = '';
+                await pollStatus(id);
+            });
+        });
+    } catch (e) { console.error(e); }
+}
