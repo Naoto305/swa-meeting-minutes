@@ -411,6 +411,26 @@ def status(req: func.HttpRequest) -> func.HttpResponse:
                 status_code=404
             )
 
+        # Access check similar to get-minutes
+        try:
+            if current_user_id:
+                if blob_name.startswith(f"users/{current_user_id}/") is False and blob_name.startswith("users/"):
+                    return func.HttpResponse(
+                        json.dumps({'status': 'forbidden'}, ensure_ascii=False),
+                        mimetype="application/json",
+                        status_code=403
+                    )
+                props = blob_client.get_blob_properties()
+                owner = (props.metadata or {}).get('user_id')
+                if owner and owner != current_user_id:
+                    return func.HttpResponse(
+                        json.dumps({'status': 'forbidden'}, ensure_ascii=False),
+                        mimetype="application/json",
+                        status_code=403
+                    )
+        except Exception as e:
+            logging.warning(f"Access check failed in status: {e}")
+
         data = blob_client.download_blob().readall()
         minutes_text = data.decode('utf-8', errors='replace') if isinstance(data, (bytes, bytearray)) else str(data)
 

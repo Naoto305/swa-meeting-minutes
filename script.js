@@ -239,10 +239,29 @@ async function loadMinutesList() {
             });
         });
         tbody.querySelectorAll('button[data-download]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const name = btn.getAttribute('data-download');
-                const url = `/api/get-minutes?name=${name}`;
-                window.open(url, '_blank');
+            btn.addEventListener('click', async () => {
+                const enc = btn.getAttribute('data-download');
+                const name = decodeURIComponent(enc);
+                try {
+                    const r = await fetch(`/api/get-minutes?name=${encodeURIComponent(name)}`);
+                    if (!r.ok) {
+                        const t = await r.text();
+                        alert(`ダウンロードに失敗しました: ${r.status} ${t}`);
+                        return;
+                    }
+                    const blob = await r.blob();
+                    const a = document.createElement('a');
+                    const url = URL.createObjectURL(blob);
+                    a.href = url;
+                    a.download = name.split('/').pop();
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(url);
+                } catch (e) {
+                    console.error(e);
+                    alert('ダウンロード中にエラーが発生しました');
+                }
             });
         });
         tbody.querySelectorAll('button[data-regenerate]').forEach(btn => {
@@ -277,11 +296,17 @@ async function loadMinutesList() {
 async function fetchAndShowByName(name) {
     try {
         const r = await fetch(`/api/status?name=${encodeURIComponent(name)}`);
-        if (!r.ok) return; // 404などは無視
+        if (!r.ok) {
+            const t = await r.text();
+            alert(`本文取得に失敗しました: ${r.status} ${t}`);
+            return;
+        }
         const j = await r.json();
         if (j.status === 'completed' && minutesBody && minutesCard) {
             minutesBody.textContent = j.minutes || '';
             minutesCard.style.display = 'block';
+        } else if (j.status === 'forbidden') {
+            alert('この議事録へのアクセス権がありません');
         }
     } catch (e) { console.error(e); }
 }
