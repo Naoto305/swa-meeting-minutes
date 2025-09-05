@@ -221,7 +221,13 @@ async function loadMinutesList() {
                 <td>${dt}</td>
                 <td>-</td>
                 <td><span class="status-badge completed"><span class="status-dot"></span>完了</span></td>
-                <td><div class="table-actions"><button class="btn-small" data-name="${encodeURIComponent(m.name)}">表示</button></div></td>
+                <td>
+                  <div class="table-actions">
+                    <button class="btn-small" data-name="${encodeURIComponent(m.name)}">表示</button>
+                    <button class="btn-small" data-download="${encodeURIComponent(m.name)}">ダウンロード</button>
+                    <button class="btn-small" data-regenerate="${encodeURIComponent(m.name)}">再生成</button>
+                  </div>
+                </td>
             </tr>`;
         }).join('');
         tbody.querySelectorAll('button[data-name]').forEach(btn => {
@@ -230,6 +236,39 @@ async function loadMinutesList() {
                 if (minutesCard) minutesCard.style.display = 'none';
                 if (minutesBody) minutesBody.textContent = '';
                 await fetchAndShowByName(decodeURIComponent(name));
+            });
+        });
+        tbody.querySelectorAll('button[data-download]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const name = btn.getAttribute('data-download');
+                const url = `/api/get-minutes?name=${name}`;
+                window.open(url, '_blank');
+            });
+        });
+        tbody.querySelectorAll('button[data-regenerate]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const name = decodeURIComponent(btn.getAttribute('data-regenerate'));
+                const prompt = window.prompt('新しい指示を入力してください（要約観点や形式など）');
+                if (!prompt) return;
+                try {
+                    const r = await fetch('/api/regenerate-minutes', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name, prompt })
+                    });
+                    if (!r.ok) {
+                        const t = await r.text();
+                        alert(`再生成に失敗しました: ${t}`);
+                        return;
+                    }
+                    const j = await r.json();
+                    if (minutesCard && minutesBody) {
+                        minutesBody.textContent = j.minutes || '';
+                        minutesCard.style.display = 'block';
+                    }
+                    // 更新後の一覧を再読み込み
+                    await loadMinutesList();
+                } catch (e) { console.error(e); }
             });
         });
     } catch (e) { console.error(e); }

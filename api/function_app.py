@@ -271,6 +271,8 @@ def generate_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
                 ]:
                     if key in audio_metadata:
                         minutes_metadata[key] = audio_metadata[key]
+                # Save backlink to transcript for future regeneration
+                minutes_metadata['transcript_blob_name'] = transcript_blob_name
                 minutes_blob_client.upload_blob(generated_minutes.encode('utf-8'), overwrite=True, metadata=minutes_metadata)
                 logging.info(f"Successfully uploaded final minutes to {minutes_filename} in container {MINUTES_CONTAINER}.")
 
@@ -421,5 +423,189 @@ def status(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         logging.error(f"Error in status endpoint: {e}", exc_info=True)
         return func.HttpResponse("Failed to get status.", status_code=500)
+
+
+@app.route(route="get-minutes")
+def get_minutes(req: func.HttpRequest) -> func.HttpResponse:
+    """Download minutes blob by exact name with user access checks."""
+    try:
+        name = req.params.get('name')
+        if not name:
+            return func.HttpResponse("Missing name.", status_code=400)
+
+        # Current user
+        auth_header = req.headers.get('X-MS-CLIENT-PRINCIPAL')
+        current_user_id = None
+        if auth_header:
+            try:
+                principal_json = base64.b64decode(auth_header).decode('utf-8')
+                principal = json.loads(principal_json)
+                current_user_id = principal.get('userId')
+            except Exception as e:
+                logging.warning(f"Failed to parse client principal in get-minutes: {e}")
+
+        minutes_connect_str = os.getenv('MINUTES_STORAGE_CONNECTION_STRING')
+        blob_service = BlobServiceClient.from_connection_string(minutes_connect_str)
+        blob_client = blob_service.get_blob_client(container=MINUTES_CONTAINER, blob=name)
+
+        if not blob_client.exists():
+            return func.HttpResponse("Not found.", status_code=404)
+
+        # Access check
+        if current_user_id:
+            try:
+                # If path includes users/{id}/, verify it matches
+                if name.startswith(f"users/{current_user_id}/") is False and name.startswith("users/"):
+                    return func.HttpResponse("Forbidden.", status_code=403)
+                props = blob_client.get_blob_properties()
+                owner = (props.metadata or {}).get('user_id')
+                if owner and owner != current_user_id:
+                    return func.HttpResponse("Forbidden.", status_code=403)
+            except Exception as e:
+                logging.warning(f"Access check failed in get-minutes: {e}")
+
+        data = blob_client.download_blob().readall()
+        filename = os.path.basename(name)
+        return func.HttpResponse(
+            data,
+            mimetype="text/plain; charset=utf-8",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            },
+            status_code=200
+        )
+
+    except Exception as e:
+        logging.error(f"Error in get_minutes: {e}", exc_info=True)
+        return func.HttpResponse("Failed to download minutes.", status_code=500)
+
+
+@app.route(route="regenerate-minutes")
+def regenerate_minutes(req: func.HttpRequest) -> func.HttpResponse:
+    """Regenerate minutes from a saved transcript with a new prompt.
+
+    Body JSON supports:
+      { "transcript_name": "...", "prompt": "..." }
+      or { "name": "minutes blob name", "prompt": "..." } where minutes metadata contains transcript_blob_name
+    """
+    try:
+        if req.method and req.method.upper() == 'GET':
+            return func.HttpResponse("Use POST with JSON body.", status_code=405)
+
+        body = req.get_json()
+        if not isinstance(body, dict):
+            return func.HttpResponse("Invalid JSON body.", status_code=400)
+        new_prompt = body.get('prompt')
+        transcript_name = body.get('transcript_name')
+        minutes_name = body.get('name')
+        if not new_prompt:
+            return func.HttpResponse("Missing prompt.", status_code=400)
+
+        # Current user
+        auth_header = req.headers.get('X-MS-CLIENT-PRINCIPAL')
+        current_user_id = None
+        if auth_header:
+            try:
+                principal_json = base64.b64decode(auth_header).decode('utf-8')
+                principal = json.loads(principal_json)
+                current_user_id = principal.get('userId')
+            except Exception as e:
+                logging.warning(f"Failed to parse client principal in regenerate: {e}")
+
+        minutes_connect_str = os.getenv('MINUTES_STORAGE_CONNECTION_STRING')
+        transcripts_connect_str = os.getenv('TRANSCRIPTS_STORAGE_CONNECTION_STRING')
+        audio_connect_str = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
+        if not all([minutes_connect_str, transcripts_connect_str, audio_connect_str]):
+            return func.HttpResponse("Server configuration error.", status_code=500)
+
+        minutes_blob_service = BlobServiceClient.from_connection_string(minutes_connect_str)
+        transcripts_blob_service = BlobServiceClient.from_connection_string(transcripts_connect_str)
+        audio_blob_service = BlobServiceClient.from_connection_string(audio_connect_str)
+
+        # If minutes_name is given, resolve transcript name from metadata
+        if minutes_name and not transcript_name:
+            m_client = minutes_blob_service.get_blob_client(MINUTES_CONTAINER, minutes_name)
+            if not m_client.exists():
+                return func.HttpResponse("Minutes not found.", status_code=404)
+            m_props = m_client.get_blob_properties()
+            # Access check
+            if current_user_id:
+                if minutes_name.startswith(f"users/{current_user_id}/") is False and minutes_name.startswith("users/"):
+                    return func.HttpResponse("Forbidden.", status_code=403)
+                owner = (m_props.metadata or {}).get('user_id') if m_props and m_props.metadata else None
+                if owner and owner != current_user_id:
+                    return func.HttpResponse("Forbidden.", status_code=403)
+            transcript_name = (m_props.metadata or {}).get('transcript_blob_name') if m_props else None
+            if not transcript_name:
+                return func.HttpResponse("Cannot locate original transcript for regeneration.", status_code=400)
+
+        if not transcript_name:
+            return func.HttpResponse("Missing transcript_name.", status_code=400)
+
+        # Load transcript JSON
+        t_client = transcripts_blob_service.get_blob_client(TRANSCRIPTS_CONTAINER, transcript_name)
+        if not t_client.exists():
+            return func.HttpResponse("Transcript not found.", status_code=404)
+        t_json = json.loads(t_client.download_blob().readall())
+        transcript_text = t_json['combinedRecognizedPhrases'][0]['display']
+        original_audio_url = t_json['source']
+
+        # Load audio metadata (for user propagation and checks)
+        parsed = urllib.parse.urlparse(original_audio_url)
+        original_audio_blob_name = os.path.basename(parsed.path)
+        a_client = audio_blob_service.get_blob_client(AUDIO_CONTAINER, original_audio_blob_name)
+        a_props = a_client.get_blob_properties()
+        audio_metadata = a_props.metadata or {}
+
+        # Access check: if audio has owner metadata, ensure it matches
+        if current_user_id and 'user_id' in audio_metadata and audio_metadata['user_id'] != current_user_id:
+            return func.HttpResponse("Forbidden.", status_code=403)
+
+        # Call Azure OpenAI
+        openai_client = AzureOpenAI(
+            azure_endpoint=os.environ.get("OPENAI_API_BASE"),
+            api_key=os.environ.get("OPENAI_API_KEY"),
+            api_version="2024-02-01"
+        )
+
+        system_prompt = "You are an expert assistant skilled at creating concise and accurate meeting minutes from a transcription. Structure the output clearly with headings like 'Summary', 'Action Items', and 'Decisions'."
+        final_prompt = f"Please create meeting minutes based on the following transcription and user prompt.\n\nUser Prompt: {new_prompt}\n\nTranscription:\n\n{transcript_text}"
+
+        ai_resp = openai_client.chat.completions.create(
+            model=os.environ.get("OPENAI_DEPLOYMENT_NAME"),
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": final_prompt}
+            ]
+        )
+        regenerated = ai_resp.choices[0].message.content
+
+        # Save regenerated minutes (versioned filename)
+        ts = datetime.utcnow().strftime('%Y%m%d%H%M%S')
+        audio_base, _ = os.path.splitext(original_audio_blob_name)
+        if current_user_id:
+            out_name = f"users/{current_user_id}/{audio_base}_minutes_{ts}.txt"
+        else:
+            out_name = f"{audio_base}_minutes_{ts}.txt"
+
+        out_client = minutes_blob_service.get_blob_client(MINUTES_CONTAINER, out_name)
+        minutes_metadata = {'transcript_blob_name': transcript_name}
+        for k in ['user_id', 'user_details_b64', 'original_prompt_b64', 'original_filename_b64']:
+            if k in audio_metadata:
+                minutes_metadata[k] = audio_metadata[k]
+        out_client.upload_blob(regenerated.encode('utf-8'), overwrite=True, metadata=minutes_metadata)
+
+        return func.HttpResponse(
+            json.dumps({
+                'name': out_name,
+                'minutes': regenerated
+            }, ensure_ascii=False),
+            mimetype="application/json",
+            status_code=200
+        )
+
+    except Exception as e:
+        logging.error(f"Error in regenerate-minutes: {e}", exc_info=True)
+        return func.HttpResponse("Failed to regenerate minutes.", status_code=500)
 
 
