@@ -38,6 +38,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 targetSection.classList.add('active-section');
             }
 
+            // 議事録一覧タブに切り替えたときに一覧を読み込む
+            if (target === 'list') {
+                loadMinutesList();
+            }
+
             // モバイルの場合はサイドバーを閉じる
             if (window.innerWidth <= 768) {
                 toggleSidebar();
@@ -52,6 +57,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const initialSection = document.getElementById(`${initialTarget}-section`);
         if (initialSection) {
             initialSection.classList.add('active-section');
+        }
+
+        // 初期表示が一覧タブの場合は読み込む
+        if (initialTarget === 'list') {
+            loadMinutesList();
         }
     }
 

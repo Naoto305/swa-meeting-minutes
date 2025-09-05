@@ -256,4 +256,106 @@ def generate_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
 
 
 
+@app.route(route="list-minutes")
+def list_minutes(req: func.HttpRequest) -> func.HttpResponse:
+    """List generated minutes files from Storage Account 3.
+
+    Returns JSON array with name, last_modified, and job_id derived from filename.
+    """
+    try:
+        minutes_connect_str = os.getenv('MINUTES_STORAGE_CONNECTION_STRING')
+        if not minutes_connect_str:
+            logging.error("MINUTES_STORAGE_CONNECTION_STRING is not configured.")
+            return func.HttpResponse("Server configuration error.", status_code=500)
+
+        blob_service = BlobServiceClient.from_connection_string(minutes_connect_str)
+        container = blob_service.get_container_client(MINUTES_CONTAINER)
+
+        items = []
+        for b in container.list_blobs():
+            # Only include text files that look like generated minutes
+            name = b.name
+            if not name.lower().endswith('.txt'):
+                continue
+            job_id = name[:-12] if name.endswith('_minutes.txt') and len(name) > len('_minutes.txt') else os.path.splitext(name)[0]
+            last_modified = None
+            try:
+                # Some SDK versions include last_modified on the list response; fall back if missing
+                if getattr(b, 'last_modified', None):
+                    last_modified = b.last_modified.isoformat()
+                else:
+                    props = container.get_blob_client(name).get_blob_properties()
+                    last_modified = props.last_modified.isoformat() if props and getattr(props, 'last_modified', None) else None
+            except Exception as e:
+                logging.warning(f"Failed to get last_modified for {name}: {e}")
+
+            items.append({
+                'name': name,
+                'last_modified': last_modified,
+                'job_id': job_id
+            })
+
+        # Sort by last_modified desc if available
+        items.sort(key=lambda x: x['last_modified'] or '', reverse=True)
+
+        return func.HttpResponse(
+            json.dumps({'minutes': items}, ensure_ascii=False),
+            mimetype="application/json",
+            status_code=200
+        )
+
+    except Exception as e:
+        logging.error(f"Error in list_minutes: {e}", exc_info=True)
+        return func.HttpResponse("Failed to list minutes.", status_code=500)
+
+
+@app.route(route="status")
+def status(req: func.HttpRequest) -> func.HttpResponse:
+    """Return status and content for a minutes job.
+
+    Query params:
+      - job_id: base name used when creating minutes (audio blob base)
+      - name: optional, exact minutes blob name (overrides job_id)
+    """
+    try:
+        job_id = req.params.get('job_id')
+        name = req.params.get('name')
+        if not job_id and not name:
+            return func.HttpResponse("Missing job_id or name.", status_code=400)
+
+        # Determine blob name
+        if name:
+            blob_name = name
+        else:
+            blob_name = f"{job_id}_minutes.txt"
+
+        minutes_connect_str = os.getenv('MINUTES_STORAGE_CONNECTION_STRING')
+        if not minutes_connect_str:
+            logging.error("MINUTES_STORAGE_CONNECTION_STRING is not configured.")
+            return func.HttpResponse("Server configuration error.", status_code=500)
+
+        blob_service = BlobServiceClient.from_connection_string(minutes_connect_str)
+        blob_client = blob_service.get_blob_client(container=MINUTES_CONTAINER, blob=blob_name)
+
+        if not blob_client.exists():
+            # Not found yet -> pending
+            return func.HttpResponse(
+                json.dumps({'status': 'pending', 'job_id': job_id or name}, ensure_ascii=False),
+                mimetype="application/json",
+                status_code=404
+            )
+
+        data = blob_client.download_blob().readall()
+        minutes_text = data.decode('utf-8', errors='replace') if isinstance(data, (bytes, bytearray)) else str(data)
+
+        return func.HttpResponse(
+            json.dumps({'status': 'completed', 'job_id': job_id or name, 'minutes': minutes_text}, ensure_ascii=False),
+            mimetype="application/json",
+            status_code=200
+        )
+
+    except Exception as e:
+        logging.error(f"Error in status endpoint: {e}", exc_info=True)
+        return func.HttpResponse("Failed to get status.", status_code=500)
+
 

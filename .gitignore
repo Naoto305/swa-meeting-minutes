@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+api/venv/
+
+# Azure Functions (local)
+local.settings.json
+.python_packages/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+*.log
+
