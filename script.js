@@ -221,16 +221,28 @@ async function loadMinutesList() {
                 <td>${dt}</td>
                 <td>-</td>
                 <td><span class="status-badge completed"><span class="status-dot"></span>完了</span></td>
-                <td><div class="table-actions"><button class="btn-small" data-open="${m.job_id}">表示</button></div></td>
+                <td><div class="table-actions"><button class="btn-small" data-name="${encodeURIComponent(m.name)}">表示</button></div></td>
             </tr>`;
         }).join('');
-        tbody.querySelectorAll('button[data-open]').forEach(btn => {
+        tbody.querySelectorAll('button[data-name]').forEach(btn => {
             btn.addEventListener('click', async () => {
-                const id = btn.getAttribute('data-open');
+                const name = btn.getAttribute('data-name');
                 if (minutesCard) minutesCard.style.display = 'none';
                 if (minutesBody) minutesBody.textContent = '';
-                await pollStatus(id);
+                await fetchAndShowByName(decodeURIComponent(name));
             });
         });
+    } catch (e) { console.error(e); }
+}
+
+async function fetchAndShowByName(name) {
+    try {
+        const r = await fetch(`/api/status?name=${encodeURIComponent(name)}`);
+        if (!r.ok) return; // 404などは無視
+        const j = await r.json();
+        if (j.status === 'completed' && minutesBody && minutesCard) {
+            minutesBody.textContent = j.minutes || '';
+            minutesCard.style.display = 'block';
+        }
     } catch (e) { console.error(e); }
 }

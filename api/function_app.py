@@ -30,6 +30,16 @@ def upload_http_trigger(req: func.HttpRequest) -> func.HttpResponse:
         auth_header = req.headers.get('X-MS-CLIENT-PRINCIPAL')
         if not auth_header:
             return func.HttpResponse("Unauthorized: User not authenticated.", status_code=401)
+        # Decode client principal to capture user identity
+        user_id = None
+        user_details = None
+        try:
+            principal_json = base64.b64decode(auth_header).decode('utf-8')
+            principal = json.loads(principal_json)
+            user_id = principal.get('userId')
+            user_details = principal.get('userDetails')
+        except Exception as e:
+            logging.warning(f"Failed to parse client principal: {e}")
         
         # --- Get File and Prompt ---
         file = req.files.get('file')
@@ -61,6 +71,10 @@ def upload_http_trigger(req: func.HttpRequest) -> func.HttpResponse:
             "original_prompt_b64": prompt_b64,
             "original_filename_b64": filename_b64
         }
+        if user_id:
+            metadata["user_id"] = user_id
+        if user_details:
+            metadata["user_details_b64"] = base64.b64encode(user_details.encode('utf-8')).decode('ascii')
         blob_client.set_blob_metadata(metadata)
         logging.info(f"Metadata set for {audio_filename}.")
 
@@ -245,7 +259,14 @@ def generate_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
                 minutes_filename = f"{audio_base}_minutes.txt"
                 
                 minutes_blob_client = minutes_blob_service_client.get_blob_client(container=MINUTES_CONTAINER, blob=minutes_filename)
-                minutes_blob_client.upload_blob(generated_minutes.encode('utf-8'), overwrite=True)
+                # Propagate identity and context metadata from the original audio blob
+                minutes_metadata = {}
+                for key in [
+                    'user_id', 'user_details_b64', 'original_prompt_b64', 'original_filename_b64'
+                ]:
+                    if key in audio_metadata:
+                        minutes_metadata[key] = audio_metadata[key]
+                minutes_blob_client.upload_blob(generated_minutes.encode('utf-8'), overwrite=True, metadata=minutes_metadata)
                 logging.info(f"Successfully uploaded final minutes to {minutes_filename} in container {MINUTES_CONTAINER}.")
 
         return func.HttpResponse("Generation event processed.", status_code=200)
@@ -268,15 +289,36 @@ def list_minutes(req: func.HttpRequest) -> func.HttpResponse:
             logging.error("MINUTES_STORAGE_CONNECTION_STRING is not configured.")
             return func.HttpResponse("Server configuration error.", status_code=500)
 
+        # Extract current user from Easy Auth header for filtering
+        auth_header = req.headers.get('X-MS-CLIENT-PRINCIPAL')
+        current_user_id = None
+        if auth_header:
+            try:
+                principal_json = base64.b64decode(auth_header).decode('utf-8')
+                principal = json.loads(principal_json)
+                current_user_id = principal.get('userId')
+            except Exception as e:
+                logging.warning(f"Failed to parse client principal in list-minutes: {e}")
+
         blob_service = BlobServiceClient.from_connection_string(minutes_connect_str)
         container = blob_service.get_container_client(MINUTES_CONTAINER)
 
         items = []
-        for b in container.list_blobs():
+        # Include metadata so we can filter by owner without per-blob requests
+        for b in container.list_blobs(include=['metadata']):
             # Only include text files that look like generated minutes
             name = b.name
             if not name.lower().endswith('.txt'):
                 continue
+            # If user filtering is enabled, skip blobs that don't belong to the current user
+            if current_user_id:
+                owner = None
+                try:
+                    owner = (b.metadata or {}).get('user_id') if hasattr(b, 'metadata') else None
+                except Exception:
+                    owner = None
+                if owner and owner != current_user_id:
+                    continue
             job_id = name[:-12] if name.endswith('_minutes.txt') and len(name) > len('_minutes.txt') else os.path.splitext(name)[0]
             last_modified = None
             try:
