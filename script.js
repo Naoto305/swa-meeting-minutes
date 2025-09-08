@@ -447,16 +447,33 @@ async function loadMinutesList() {
 // --- ffmpeg.wasm による動画→音声抽出 ---
 let ffmpegInstance = null;
 async function ensureFfmpeg() {
-    if (window.FFmpeg && window.FFmpeg.createFFmpeg) {
-        // ok
-    } else {
-        await loadScript('https://unpkg.com/@ffmpeg/ffmpeg@0.12.6/dist/ffmpeg.min.js');
+    const scriptCandidates = [
+        'https://unpkg.com/@ffmpeg/ffmpeg@0.12.6/dist/ffmpeg.min.js',
+        'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.6/dist/ffmpeg.min.js'
+    ];
+    if (!(window.FFmpeg && window.FFmpeg.createFFmpeg)) {
+        let loaded = false;
+        for (const src of scriptCandidates) {
+            try {
+                await loadScript(src);
+                loaded = true;
+                break;
+            } catch (e) { /* try next */ }
+        }
+        if (!loaded) throw new Error('ffmpegライブラリの読み込みに失敗しました');
     }
     if (!ffmpegInstance) {
-        ffmpegInstance = window.FFmpeg.createFFmpeg({
-            log: false,
-            corePath: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/ffmpeg-core.js'
-        });
+        // core は single-thread 版を使用（COOP/COEP不要にするため）
+        const coreCandidates = [
+            'https://unpkg.com/@ffmpeg/core-st@0.12.6/dist/ffmpeg-core.js',
+            'https://cdn.jsdelivr.net/npm/@ffmpeg/core-st@0.12.6/dist/ffmpeg-core.js'
+        ];
+        let corePath = null;
+        for (const c of coreCandidates) {
+            corePath = c; // we just set; runtime will fetch, try first URL
+            break;
+        }
+        ffmpegInstance = window.FFmpeg.createFFmpeg({ log: false, corePath });
         await ffmpegInstance.load();
     }
 }
@@ -465,8 +482,9 @@ function loadScript(src) {
     return new Promise((resolve, reject) => {
         const s = document.createElement('script');
         s.src = src;
+        s.async = true;
         s.onload = () => resolve();
-        s.onerror = reject;
+        s.onerror = (ev) => reject(ev);
         document.head.appendChild(s);
     });
 }
