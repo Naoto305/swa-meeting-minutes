@@ -376,20 +376,22 @@ def status(req: func.HttpRequest) -> func.HttpResponse:
         if not job_id and not name:
             return func.HttpResponse("Missing job_id or name.", status_code=400)
 
+        # Get current user for access checks and path resolution
+        auth_header = req.headers.get('X-MS-CLIENT-PRINCIPAL')
+        current_user_id = None
+        if auth_header:
+            try:
+                principal_json = base64.b64decode(auth_header).decode('utf-8')
+                principal = json.loads(principal_json)
+                current_user_id = principal.get('userId')
+            except Exception as e:
+                logging.warning(f"Failed to parse client principal in status: {e}")
+
         # Determine blob name
         if name:
             blob_name = name
         else:
             # If only job_id is provided, resolve to the current user's folder if available
-            auth_header = req.headers.get('X-MS-CLIENT-PRINCIPAL')
-            current_user_id = None
-            if auth_header:
-                try:
-                    principal_json = base64.b64decode(auth_header).decode('utf-8')
-                    principal = json.loads(principal_json)
-                    current_user_id = principal.get('userId')
-                except Exception as e:
-                    logging.warning(f"Failed to parse client principal in status: {e}")
             if current_user_id:
                 blob_name = f"users/{current_user_id}/{job_id}_minutes.txt"
             else:
