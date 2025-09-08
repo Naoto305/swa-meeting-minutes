@@ -712,9 +712,19 @@ def translate_minutes(req: func.HttpRequest) -> func.HttpResponse:
         if not endpoint or not key:
             return func.HttpResponse("Translator not configured.", status_code=500)
 
-        # Normalize endpoint (may be like https://api.cognitive.microsofttranslator.com or https://<res>.cognitiveservices.azure.com)
+        # Normalize endpoint
+        # - Global Translator: https://api.cognitive.microsofttranslator.com -> /translate
+        # - Cognitive Services resource: https://<res>.cognitiveservices.azure.com -> /translator/text/v3.0/translate
         endpoint = endpoint.rstrip('/')
-        url = f"{endpoint}/translate"
+        ep_lower = endpoint.lower()
+        base = endpoint
+        if '/translator/text/v3.0' in ep_lower:
+            base = endpoint
+        elif 'cognitiveservices.azure.com' in ep_lower:
+            base = f"{endpoint}/translator/text/v3.0"
+        else:
+            base = endpoint  # assume global translator endpoint
+        url = base if base.endswith('/translate') else f"{base}/translate"
         params = { 'api-version': '3.0', 'to': to_lang }
         if from_lang:
             params['from'] = from_lang
