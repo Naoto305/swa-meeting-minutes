@@ -72,50 +72,66 @@ def upload_http_trigger(req: func.HttpRequest) -> func.HttpResponse:
             # Extract audio using ffmpeg -> 16kHz mono WAV for robust transcription
             ffmpeg_path = os.getenv('FFMPEG_PATH') or shutil.which('ffmpeg')
             if not ffmpeg_path:
-                return func.HttpResponse(
-                    "FFmpeg not available. Set FFMPEG_PATH or include ffmpeg.", status_code=500
-                )
-
-            # Save uploaded video to temp file
-            with tempfile.TemporaryDirectory() as td:
-                in_path = os.path.join(td, f"in{ext_lower or '.bin'}")
-                out_path = os.path.join(td, f"out_{uid}.wav")
-                with open(in_path, 'wb') as ftmp:
-                    ftmp.write(file.read())
-                # Build ffmpeg command
-                cmd = [
-                    ffmpeg_path, '-y', '-i', in_path,
-                    '-vn', '-ac', '1', '-ar', '16000', '-f', 'wav', out_path
-                ]
-                try:
-                    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                except subprocess.CalledProcessError as e:
-                    logging.error(f"ffmpeg failed: {e.stderr.decode('utf-8', errors='ignore')}")
-                    return func.HttpResponse("Failed to extract audio from video.", status_code=500)
-
-                # Upload extracted audio
-                audio_blob_name = f"{base_name}_{uid}.wav"
-                blob_client = blob_service_client.get_blob_client(container=AUDIO_CONTAINER, blob=audio_blob_name)
-                logging.info(f"Uploading extracted audio {audio_blob_name} to container {AUDIO_CONTAINER}.")
-                with open(out_path, 'rb') as fa:
-                    blob_client.upload_blob(fa.read(), overwrite=True)
-
-                # Set metadata after upload
-                # Base64 encode metadata values to handle non-ASCII characters
+                # Fallback: ffmpeg が無い場合は動画ファイルをそのままアップロード（後段で処理できる形式の場合を期待）
+                logging.warning("FFmpeg not available. Uploading video file as-is to audio container.")
+                audio_filename = f"{base_name}_{uid}{extension or '.mp4'}"
+                blob_client = blob_service_client.get_blob_client(container=AUDIO_CONTAINER, blob=audio_filename)
+                file_content = file.read()
+                blob_client.upload_blob(file_content, overwrite=True)
+                # メタデータ
                 prompt_b64 = base64.b64encode(prompt.encode('utf-8')).decode('ascii')
                 filename_b64 = base64.b64encode(original_filename.encode('utf-8')).decode('ascii')
                 metadata = {
                     "original_prompt_b64": prompt_b64,
                     "original_filename_b64": filename_b64,
-                    "source_type": "video"
+                    "source_type": "video_raw"
                 }
                 if user_id:
                     metadata["user_id"] = user_id
                 if user_details:
                     metadata["user_details_b64"] = base64.b64encode(user_details.encode('utf-8')).decode('ascii')
                 blob_client.set_blob_metadata(metadata)
+            else:
+                # Save uploaded video to temp file
+                with tempfile.TemporaryDirectory() as td:
+                    in_path = os.path.join(td, f"in{ext_lower or '.bin'}")
+                    out_path = os.path.join(td, f"out_{uid}.wav")
+                    with open(in_path, 'wb') as ftmp:
+                        ftmp.write(file.read())
+                    # Build ffmpeg command
+                    cmd = [
+                        ffmpeg_path, '-y', '-i', in_path,
+                        '-vn', '-ac', '1', '-ar', '16000', '-f', 'wav', out_path
+                    ]
+                    try:
+                        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    except subprocess.CalledProcessError as e:
+                        logging.error(f"ffmpeg failed: {e.stderr.decode('utf-8', errors='ignore')}")
+                        return func.HttpResponse("Failed to extract audio from video.", status_code=500)
 
-                audio_filename = audio_blob_name
+                    # Upload extracted audio
+                    audio_blob_name = f"{base_name}_{uid}.wav"
+                    blob_client = blob_service_client.get_blob_client(container=AUDIO_CONTAINER, blob=audio_blob_name)
+                    logging.info(f"Uploading extracted audio {audio_blob_name} to container {AUDIO_CONTAINER}.")
+                    with open(out_path, 'rb') as fa:
+                        blob_client.upload_blob(fa.read(), overwrite=True)
+
+                    # Set metadata after upload
+                    # Base64 encode metadata values to handle non-ASCII characters
+                    prompt_b64 = base64.b64encode(prompt.encode('utf-8')).decode('ascii')
+                    filename_b64 = base64.b64encode(original_filename.encode('utf-8')).decode('ascii')
+                    metadata = {
+                        "original_prompt_b64": prompt_b64,
+                        "original_filename_b64": filename_b64,
+                        "source_type": "video"
+                    }
+                    if user_id:
+                        metadata["user_id"] = user_id
+                    if user_details:
+                        metadata["user_details_b64"] = base64.b64encode(user_details.encode('utf-8')).decode('ascii')
+                    blob_client.set_blob_metadata(metadata)
+
+                    audio_filename = audio_blob_name
         else:
             # Directly upload audio as before
             audio_filename = f"{base_name}_{uid}{extension}"
