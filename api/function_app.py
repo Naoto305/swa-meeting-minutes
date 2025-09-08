@@ -487,12 +487,25 @@ def get_minutes(req: func.HttpRequest) -> func.HttpResponse:
                 logging.warning(f"Access check failed in get-minutes: {e}")
 
         data = blob_client.download_blob().readall()
-        filename = os.path.basename(name)
+        filename = os.path.basename(name) or 'minutes.txt'
+        # Ensure .txt extension for download
+        if not filename.lower().endswith('.txt'):
+            filename = f"{filename}.txt"
+        # Build Content-Disposition that is ASCII-safe and UTF-8 friendly (RFC 5987)
+        try:
+            ascii_fallback = ''.join(ch if ord(ch) < 128 else '_' for ch in filename)
+            if not ascii_fallback.strip('_'):
+                ascii_fallback = 'minutes.txt'
+            filename_star = urllib.parse.quote(filename)
+            content_disposition = f"attachment; filename={ascii_fallback}; filename*=UTF-8''{filename_star}"
+        except Exception:
+            content_disposition = "attachment; filename=minutes.txt"
+
         return func.HttpResponse(
             data,
             mimetype="text/plain; charset=utf-8",
             headers={
-                "Content-Disposition": f"attachment; filename={filename}"
+                "Content-Disposition": content_disposition
             },
             status_code=200
         )
