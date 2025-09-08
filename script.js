@@ -149,25 +149,9 @@ if (dropzone) {
 async function handleFileUpload(file) {
     console.log('Uploaded file:', file);
     progressCard.style.display = 'block';
-    let toUpload = file;
-    try {
-        if (file && file.type && file.type.startsWith('video/')) {
-            // フロントでffmpeg.wasmを用いて音声抽出
-            if (progressCard) {
-                const title = progressCard.querySelector('.progress-title');
-                if (title) title.textContent = '動画から音声を抽出中...';
-            }
-            toUpload = await extractAudioOnClient(file);
-        }
-    } catch (e) {
-        alert('動画から音声抽出に失敗しました。');
-        console.error(e);
-        progressCard.style.display = 'none';
-        return;
-    }
 
     const formData = new FormData();
-    formData.append('file', toUpload);
+    formData.append('file', file);
 
     try {
         // Azure Functionsのエンドポイント '/api/upload' にファイルをPOST
@@ -442,51 +426,6 @@ async function loadMinutesList() {
             });
         });
     } catch (e) { console.error(e); }
-}
-
-// --- ffmpeg.wasm による動画→音声抽出 ---
-let ffmpegInstance = null;
-async function ensureFfmpeg() {
-    if (window.FFmpeg && window.FFmpeg.createFFmpeg) {
-        // ok
-    } else {
-        await loadScript('https://unpkg.com/@ffmpeg/ffmpeg@0.12.6/dist/ffmpeg.min.js');
-    }
-    if (!ffmpegInstance) {
-        ffmpegInstance = window.FFmpeg.createFFmpeg({
-            log: false,
-            corePath: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/ffmpeg-core.js'
-        });
-        await ffmpegInstance.load();
-    }
-}
-
-function loadScript(src) {
-    return new Promise((resolve, reject) => {
-        const s = document.createElement('script');
-        s.src = src;
-        s.onload = () => resolve();
-        s.onerror = reject;
-        document.head.appendChild(s);
-    });
-}
-
-async function extractAudioOnClient(file) {
-    await ensureFfmpeg();
-    const { fetchFile } = window.FFmpeg;
-    const data = await fetchFile(file);
-    const inputName = 'input' + (file.name && file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '.mp4');
-    const outputName = 'output.wav';
-    ffmpegInstance.FS('writeFile', inputName, data);
-    // 16kHz mono WAV に変換
-    await ffmpegInstance.run('-i', inputName, '-vn', '-ac', '1', '-ar', '16000', '-f', 'wav', outputName);
-    const out = ffmpegInstance.FS('readFile', outputName);
-    const base = (file.name || 'audio').replace(/\.[^.]+$/, '');
-    const wavFile = new File([out.buffer], `${base}_audio.wav`, { type: 'audio/wav' });
-    // クリーンアップ（失敗しても致命的ではない）
-    try { ffmpegInstance.FS('unlink', inputName); } catch {}
-    try { ffmpegInstance.FS('unlink', outputName); } catch {}
-    return wavFile;
 }
 
 async function fetchAndShowByName(name) {
