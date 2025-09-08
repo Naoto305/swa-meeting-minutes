@@ -299,11 +299,16 @@ async function loadMinutesList() {
                         alert(`ダウンロードに失敗しました: ${r.status} ${t}`);
                         return;
                     }
-                    const blob = await r.blob();
+                    // サーバーのタイプに関わらず .txt として保存させる
+                    let blob = await r.blob();
+                    // 明示的に text/plain を指定
+                    blob = new Blob([blob], { type: 'text/plain; charset=utf-8' });
                     const a = document.createElement('a');
                     const url = URL.createObjectURL(blob);
                     a.href = url;
-                    a.download = name.split('/').pop();
+                    let fileName = (name.split('/').pop() || 'minutes.txt');
+                    if (!fileName.toLowerCase().endsWith('.txt')) fileName += '.txt';
+                    a.download = fileName;
                     document.body.appendChild(a);
                     a.click();
                     a.remove();
