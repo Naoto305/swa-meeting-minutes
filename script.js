@@ -369,6 +369,7 @@ async function loadMinutesList() {
                             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
                                 <h3 style="margin:0;font-size:16px;">翻訳プレビュー (${to})</h3>
                                 <div style="display:flex;gap:8px;">
+                                  <button class="btn-small" data-save>保存</button>
                                   <button class="btn-small" data-close>閉じる</button>
                                 </div>
                             </div>
@@ -395,6 +396,28 @@ async function loadMinutesList() {
                     const j = await r.json();
                     pre.textContent = j.translated || '';
                     pre.style.opacity = '1';
+                    // 保存ボタン
+                    const saveBtn = detail.querySelector('button[data-save]');
+                    if (saveBtn) {
+                        saveBtn.addEventListener('click', async () => {
+                            try {
+                                const r2 = await fetch('/api/translate-minutes', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ name, to, save: true, translated: pre.textContent })
+                                });
+                                if (!r2.ok) {
+                                    const t2 = await r2.text();
+                                    alert(`保存に失敗しました: ${r2.status} ${t2}`);
+                                    return;
+                                }
+                                const j2 = await r2.json();
+                                alert('翻訳を新しい議事録として保存しました');
+                                // 一覧を更新
+                                await loadMinutesList();
+                            } catch (e) { console.error(e); alert('保存中にエラーが発生しました'); }
+                        });
+                    }
                 } catch (e) {
                     console.error(e);
                     alert('翻訳中にエラーが発生しました');
