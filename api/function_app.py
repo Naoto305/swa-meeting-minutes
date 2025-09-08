@@ -796,11 +796,20 @@ def translate_minutes(req: func.HttpRequest) -> func.HttpResponse:
                 saved_name = f"{prefix}{base}_translated_{to_lang}_{ts}.txt"
                 out_client = mbs.get_blob_client(MINUTES_CONTAINER, saved_name)
                 # build metadata (propagate + translation info)
+                # Note: Azure Blob metadata values must be ASCII-safe.
+                #       非ASCIIになり得る値は UTF-8 を Base64 化して *_b64 として保存する。
                 out_meta = {}
                 for k in ['user_id', 'user_details_b64', 'original_prompt_b64', 'original_filename_b64', 'transcript_blob_name']:
                     if k in (minutes_metadata or {}):
                         out_meta[k] = minutes_metadata[k]
-                out_meta['translated_from_name'] = minutes_name or ''
+                # minutes_name は日本語など非ASCIIを含む可能性があるため base64 で保存
+                if minutes_name:
+                    try:
+                        out_meta['translated_from_name_b64'] = base64.b64encode(minutes_name.encode('utf-8')).decode('ascii')
+                    except Exception:
+                        out_meta['translated_from_name_b64'] = ''
+                else:
+                    out_meta['translated_from_name_b64'] = ''
                 out_meta['translated_to'] = to_lang
                 if detected_lang:
                     out_meta['detected_language'] = detected_lang
