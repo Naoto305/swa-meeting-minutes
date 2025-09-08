@@ -7,9 +7,6 @@ import uuid
 import base64
 import urllib.parse
 from datetime import datetime, timedelta
-import tempfile
-import subprocess
-import shutil
 from azure.storage.blob import (
     BlobServiceClient,
     generate_blob_sas,
@@ -52,92 +49,33 @@ def upload_http_trigger(req: func.HttpRequest) -> func.HttpResponse:
 
         # --- Upload to Azure Storage with Metadata ---
         original_filename = file.filename
-        content_type = getattr(file, 'content_type', None) or req.headers.get('Content-Type', '')
-        # Create a unique base name for the blob to avoid overwrites
+        # Create a unique name for the blob to avoid overwrites
         base_name, extension = os.path.splitext(original_filename)
-        uid = str(uuid.uuid4())
-
-        # Decide whether this is a video and needs audio extraction
-        ext_lower = (extension or '').lower()
-        is_video = False
-        video_exts = {'.mp4', '.mov', '.mkv', '.avi', '.wmv', '.webm', '.m4v'}
-        audio_exts = {'.mp3', '.wav', '.m4a', '.aac', '.ogg', '.wma', '.flac', '.webm'}
-        if content_type.startswith('video/') or (ext_lower in video_exts and ext_lower not in audio_exts):
-            is_video = True
+        audio_filename = f"{base_name}_{uuid.uuid4()}{extension}"
 
         connect_str = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
         blob_service_client = BlobServiceClient.from_connection_string(connect_str)
+        
+        blob_client = blob_service_client.get_blob_client(container=AUDIO_CONTAINER, blob=audio_filename)
+        
+        logging.info(f"Uploading {audio_filename} to container {AUDIO_CONTAINER}.")
+        # Get file content from the stream
+        file_content = file.read()
+        blob_client.upload_blob(file_content, overwrite=True)
 
-        if is_video:
-            # Extract audio using ffmpeg -> 16kHz mono WAV for robust transcription
-            ffmpeg_path = os.getenv('FFMPEG_PATH') or shutil.which('ffmpeg')
-            if not ffmpeg_path:
-                return func.HttpResponse(
-                    "FFmpeg not available. Set FFMPEG_PATH or include ffmpeg.", status_code=500
-                )
+        # Base64 encode metadata values to handle non-ASCII characters
+        prompt_b64 = base64.b64encode(prompt.encode('utf-8')).decode('ascii')
+        filename_b64 = base64.b64encode(original_filename.encode('utf-8')).decode('ascii')
 
-            # Save uploaded video to temp file
-            with tempfile.TemporaryDirectory() as td:
-                in_path = os.path.join(td, f"in{ext_lower or '.bin'}")
-                out_path = os.path.join(td, f"out_{uid}.wav")
-                with open(in_path, 'wb') as ftmp:
-                    ftmp.write(file.read())
-                # Build ffmpeg command
-                cmd = [
-                    ffmpeg_path, '-y', '-i', in_path,
-                    '-vn', '-ac', '1', '-ar', '16000', '-f', 'wav', out_path
-                ]
-                try:
-                    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                except subprocess.CalledProcessError as e:
-                    logging.error(f"ffmpeg failed: {e.stderr.decode('utf-8', errors='ignore')}")
-                    return func.HttpResponse("Failed to extract audio from video.", status_code=500)
-
-                # Upload extracted audio
-                audio_blob_name = f"{base_name}_{uid}.wav"
-                blob_client = blob_service_client.get_blob_client(container=AUDIO_CONTAINER, blob=audio_blob_name)
-                logging.info(f"Uploading extracted audio {audio_blob_name} to container {AUDIO_CONTAINER}.")
-                with open(out_path, 'rb') as fa:
-                    blob_client.upload_blob(fa.read(), overwrite=True)
-
-                # Set metadata after upload
-                # Base64 encode metadata values to handle non-ASCII characters
-                prompt_b64 = base64.b64encode(prompt.encode('utf-8')).decode('ascii')
-                filename_b64 = base64.b64encode(original_filename.encode('utf-8')).decode('ascii')
-                metadata = {
-                    "original_prompt_b64": prompt_b64,
-                    "original_filename_b64": filename_b64,
-                    "source_type": "video"
-                }
-                if user_id:
-                    metadata["user_id"] = user_id
-                if user_details:
-                    metadata["user_details_b64"] = base64.b64encode(user_details.encode('utf-8')).decode('ascii')
-                blob_client.set_blob_metadata(metadata)
-
-                audio_filename = audio_blob_name
-        else:
-            # Directly upload audio as before
-            audio_filename = f"{base_name}_{uid}{extension}"
-            blob_client = blob_service_client.get_blob_client(container=AUDIO_CONTAINER, blob=audio_filename)
-            logging.info(f"Uploading {audio_filename} to container {AUDIO_CONTAINER}.")
-            file_content = file.read()
-            blob_client.upload_blob(file_content, overwrite=True)
-
-            # Base64 encode metadata values to handle non-ASCII characters
-            prompt_b64 = base64.b64encode(prompt.encode('utf-8')).decode('ascii')
-            filename_b64 = base64.b64encode(original_filename.encode('utf-8')).decode('ascii')
-            metadata = {
-                "original_prompt_b64": prompt_b64,
-                "original_filename_b64": filename_b64,
-                "source_type": "audio"
-            }
-            if user_id:
-                metadata["user_id"] = user_id
-            if user_details:
-                metadata["user_details_b64"] = base64.b64encode(user_details.encode('utf-8')).decode('ascii')
-            blob_client.set_blob_metadata(metadata)
-
+        metadata = {
+            "original_prompt_b64": prompt_b64,
+            "original_filename_b64": filename_b64
+        }
+        if user_id:
+            metadata["user_id"] = user_id
+        if user_details:
+            metadata["user_details_b64"] = base64.b64encode(user_details.encode('utf-8')).decode('ascii')
+        blob_client.set_blob_metadata(metadata)
         logging.info(f"Metadata set for {audio_filename}.")
 
         return func.HttpResponse(
