@@ -230,12 +230,62 @@ async function loadMinutesList() {
                 </td>
             </tr>`;
         }).join('');
+        // クリックした行の直下に詳細（議事録本文）をアコーディオン表示
         tbody.querySelectorAll('button[data-name]').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const name = btn.getAttribute('data-name');
-                if (minutesCard) minutesCard.style.display = 'none';
-                if (minutesBody) minutesBody.textContent = '';
-                await fetchAndShowByName(decodeURIComponent(name));
+            btn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                const enc = btn.getAttribute('data-name');
+                const name = decodeURIComponent(enc);
+
+                // すでに開いている詳細行を閉じる（複数開かない仕様）
+                tbody.querySelectorAll('tr.detail-row').forEach(r => r.remove());
+
+                // 本ボタンの行の次にプレースホルダーを挿入
+                const tr = btn.closest('tr');
+                const detail = document.createElement('tr');
+                detail.className = 'detail-row';
+                detail.innerHTML = `
+                    <td colspan="5">
+                        <div class="card" style="margin-top:8px;">
+                            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
+                                <h3 style="margin:0;font-size:16px;">本文プレビュー</h3>
+                                <div style="display:flex;gap:8px;">
+                                  <button class="btn-small" data-close>閉じる</button>
+                                </div>
+                            </div>
+                            <pre class="minutes-inline" style="white-space:pre-wrap;word-break:break-word;min-height:60px;opacity:.8;">読み込み中...</pre>
+                        </div>
+                    </td>`;
+                tr.after(detail);
+
+                const closeBtn = detail.querySelector('button[data-close]');
+                if (closeBtn) closeBtn.addEventListener('click', () => detail.remove());
+
+                const pre = detail.querySelector('pre.minutes-inline');
+                try {
+                    const r = await fetch(`/api/status?name=${encodeURIComponent(name)}`);
+                    if (!r.ok) {
+                        const t = await r.text();
+                        alert(`本文取得に失敗しました: ${r.status} ${t}`);
+                        detail.remove();
+                        return;
+                    }
+                    const j = await r.json();
+                    if (j.status === 'completed') {
+                        pre.textContent = j.minutes || '';
+                        pre.style.opacity = '1';
+                    } else if (j.status === 'forbidden') {
+                        alert('この議事録へのアクセス権がありません');
+                        detail.remove();
+                    } else {
+                        pre.textContent = `現在のステータス: ${j.status || 'unknown'}`;
+                        pre.style.opacity = '1';
+                    }
+                } catch (e) {
+                    console.error(e);
+                    alert('本文取得中にエラーが発生しました');
+                    detail.remove();
+                }
             });
         });
         tbody.querySelectorAll('button[data-download]').forEach(btn => {
