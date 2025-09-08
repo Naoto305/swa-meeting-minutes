@@ -644,3 +644,127 @@ def regenerate_minutes(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse("Failed to regenerate minutes.", status_code=500)
 
 
+@app.route(route="translate-minutes")
+def translate_minutes(req: func.HttpRequest) -> func.HttpResponse:
+    """Translate minutes text using Azure AI Translator.
+
+    POST JSON:
+      - name: minutes blob name to load and translate (optional if text provided)
+      - text: raw text to translate (optional if name provided)
+      - to: target language code (e.g., 'en', 'ja', 'zh-Hans')
+      - from: source language code (optional; autodetect if omitted)
+    """
+    try:
+        if req.method and req.method.upper() == 'GET':
+            return func.HttpResponse("Use POST with JSON body.", status_code=405)
+
+        body = req.get_json()
+        if not isinstance(body, dict):
+            return func.HttpResponse("Invalid JSON body.", status_code=400)
+
+        minutes_name = body.get('name')
+        source_text = body.get('text')
+        to_lang = body.get('to')
+        from_lang = body.get('from')
+        if not to_lang:
+            return func.HttpResponse("Missing 'to' language.", status_code=400)
+        if not minutes_name and not source_text:
+            return func.HttpResponse("Provide either 'name' or 'text'.", status_code=400)
+
+        # Current user for access checks when loading by name
+        auth_header = req.headers.get('X-MS-CLIENT-PRINCIPAL')
+        current_user_id = None
+        if auth_header:
+            try:
+                principal_json = base64.b64decode(auth_header).decode('utf-8')
+                principal = json.loads(principal_json)
+                current_user_id = principal.get('userId')
+            except Exception as e:
+                logging.warning(f"Failed to parse client principal in translate: {e}")
+
+        # If name provided, load minutes text from storage with access checks
+        if minutes_name:
+            minutes_connect_str = os.getenv('MINUTES_STORAGE_CONNECTION_STRING')
+            if not minutes_connect_str:
+                return func.HttpResponse("Server configuration error.", status_code=500)
+            blob_service = BlobServiceClient.from_connection_string(minutes_connect_str)
+            m_client = blob_service.get_blob_client(MINUTES_CONTAINER, minutes_name)
+            if not m_client.exists():
+                return func.HttpResponse("Minutes not found.", status_code=404)
+            # Access check similar to get-minutes
+            try:
+                if current_user_id:
+                    if minutes_name.startswith(f"users/{current_user_id}/") is False and minutes_name.startswith("users/"):
+                        return func.HttpResponse("Forbidden.", status_code=403)
+                    props = m_client.get_blob_properties()
+                    owner = (props.metadata or {}).get('user_id')
+                    if owner and owner != current_user_id:
+                        return func.HttpResponse("Forbidden.", status_code=403)
+            except Exception as e:
+                logging.warning(f"Access check failed in translate: {e}")
+            data = m_client.download_blob().readall()
+            source_text = data.decode('utf-8', errors='replace') if isinstance(data, (bytes, bytearray)) else str(data)
+
+        # Call Azure Translator
+        endpoint = os.getenv('TRANSLATOR_ENDPOINT')
+        key = os.getenv('TRANSLATOR_KEY')
+        region = os.getenv('TRANSLATOR_REGION')
+        if not endpoint or not key:
+            return func.HttpResponse("Translator not configured.", status_code=500)
+
+        # Normalize endpoint (may be like https://api.cognitive.microsofttranslator.com or https://<res>.cognitiveservices.azure.com)
+        endpoint = endpoint.rstrip('/')
+        url = f"{endpoint}/translate"
+        params = { 'api-version': '3.0', 'to': to_lang }
+        if from_lang:
+            params['from'] = from_lang
+        headers = {
+            'Ocp-Apim-Subscription-Key': key,
+            'Content-Type': 'application/json'
+        }
+        if region:
+            headers['Ocp-Apim-Subscription-Region'] = region
+
+        payload = [{ 'text': source_text }]
+        try:
+            resp = requests.post(url, params=params, headers=headers, data=json.dumps(payload), timeout=30)
+        except Exception as e:
+            logging.error(f"Translator request failed: {e}")
+            return func.HttpResponse("Translator request failed.", status_code=502)
+
+        if resp.status_code < 200 or resp.status_code >= 300:
+            logging.error(f"Translator error: {resp.status_code} {resp.text}")
+            return func.HttpResponse(f"Translator error: {resp.text}", status_code=502)
+
+        result = resp.json()
+        translated_text = None
+        detected_lang = None
+        try:
+            if isinstance(result, list) and result:
+                item = result[0]
+                translations = item.get('translations') or []
+                if translations:
+                    translated_text = translations[0].get('text')
+                det = item.get('detectedLanguage') or {}
+                detected_lang = det.get('language')
+        except Exception:
+            translated_text = None
+
+        if translated_text is None:
+            return func.HttpResponse("Failed to parse translation result.", status_code=500)
+
+        return func.HttpResponse(
+            json.dumps({
+                'to': to_lang,
+                'detected': detected_lang,
+                'translated': translated_text
+            }, ensure_ascii=False),
+            mimetype="application/json",
+            status_code=200
+        )
+
+    except Exception as e:
+        logging.error(f"Error in translate-minutes: {e}", exc_info=True)
+        return func.HttpResponse("Failed to translate minutes.", status_code=500)
+
+

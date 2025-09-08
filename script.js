@@ -225,6 +225,7 @@ async function loadMinutesList() {
                   <div class="table-actions">
                     <button class="btn-small" data-name="${encodeURIComponent(m.name)}">表示</button>
                     <button class="btn-small" data-download="${encodeURIComponent(m.name)}">ダウンロード</button>
+                    <button class="btn-small" data-translate="${encodeURIComponent(m.name)}">翻訳</button>
                     <button class="btn-small" data-regenerate="${encodeURIComponent(m.name)}">再生成</button>
                   </div>
                 </td>
@@ -343,6 +344,62 @@ async function loadMinutesList() {
                     // 更新後の一覧を再読み込み
                     await loadMinutesList();
                 } catch (e) { console.error(e); }
+            });
+        });
+
+        // 翻訳: 言語コードを聞いてサーバーで翻訳し、行下に表示
+        tbody.querySelectorAll('button[data-translate]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const enc = btn.getAttribute('data-translate');
+                const name = decodeURIComponent(enc);
+                const to = window.prompt('翻訳先の言語コードを入力してください (例: en, ja, zh-Hans)');
+                if (!to) return;
+
+                // 既存の詳細行を閉じる
+                const tbodyEl = btn.closest('tbody');
+                tbodyEl && tbodyEl.querySelectorAll('tr.detail-row').forEach(r => r.remove());
+
+                // 詳細行テンプレートを挿入
+                const tr = btn.closest('tr');
+                const detail = document.createElement('tr');
+                detail.className = 'detail-row';
+                detail.innerHTML = `
+                    <td colspan="5">
+                        <div class="card" style="margin-top:8px;">
+                            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
+                                <h3 style="margin:0;font-size:16px;">翻訳プレビュー (${to})</h3>
+                                <div style="display:flex;gap:8px;">
+                                  <button class="btn-small" data-close>閉じる</button>
+                                </div>
+                            </div>
+                            <pre class="minutes-inline" style="white-space:pre-wrap;word-break:break-word;min-height:60px;opacity:.8;">翻訳中...</pre>
+                        </div>
+                    </td>`;
+                tr.after(detail);
+                const closeBtn = detail.querySelector('button[data-close]');
+                if (closeBtn) closeBtn.addEventListener('click', () => detail.remove());
+
+                const pre = detail.querySelector('pre.minutes-inline');
+                try {
+                    const r = await fetch('/api/translate-minutes', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name, to })
+                    });
+                    if (!r.ok) {
+                        const t = await r.text();
+                        alert(`翻訳に失敗しました: ${r.status} ${t}`);
+                        detail.remove();
+                        return;
+                    }
+                    const j = await r.json();
+                    pre.textContent = j.translated || '';
+                    pre.style.opacity = '1';
+                } catch (e) {
+                    console.error(e);
+                    alert('翻訳中にエラーが発生しました');
+                    detail.remove();
+                }
             });
         });
     } catch (e) { console.error(e); }
