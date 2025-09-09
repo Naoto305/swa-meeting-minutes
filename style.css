@@ -476,6 +476,10 @@ body {
     color: var(--text-tertiary);
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--bg-tertiary);
 }
 
 .data-table td {
@@ -514,6 +518,30 @@ body {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+}
+
+/* タイトルセルの見た目と省略 */
+.title-cell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0; /* flex内でellipsis有効化 */
+}
+
+.title-text {
+    display: inline-block;
+    max-width: 520px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.title-text[data-open] {
+    cursor: pointer;
+}
+
+.title-text[data-open]:hover {
+    text-decoration: underline;
 }
 
 .btn-small:hover {
@@ -612,6 +640,10 @@ body {
     .data-table th,
     .data-table td {
         padding: 12px;
+    }
+
+    .title-text {
+        max-width: 60vw;
     }
 
     .table-actions {

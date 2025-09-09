@@ -298,16 +298,20 @@ function bindListControlsIfNeeded(total) {
 function renderMinutesTable(items) {
     const tbody = document.querySelector('.data-table tbody');
     if (!tbody) return;
+    if (!items || items.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" style="padding:24px;color:var(--text-tertiary);text-align:center;">該当する議事録がありません</td></tr>`;
+        return;
+    }
     tbody.innerHTML = (items || []).map(m => {
             const dt = m.last_modified ? new Date(m.last_modified).toLocaleString() : '';
             return `<tr>
                 <td>
-                    <div style="display:flex;align-items:center;gap:8px;">
+                    <div class="title-cell">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="stroke: var(--text-tertiary);">
                             <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke-linecap="round" stroke-linejoin="round"/>
                             <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
-                        ${m.title || m.name}
+                        <span class="title-text" data-open="${encodeURIComponent(m.name)}" title="クリックして本文プレビュー">${m.title || m.name}</span>
                     </div>
                 </td>
                 <td>${dt}</td>
@@ -336,6 +340,62 @@ function renderMinutesTable(items) {
 
                 // 本ボタンの行の次にプレースホルダーを挿入
                 const tr = btn.closest('tr');
+                const detail = document.createElement('tr');
+                detail.className = 'detail-row';
+                detail.innerHTML = `
+                    <td colspan="4">
+                        <div class="card" style="margin-top:8px;">
+                            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
+                                <h3 style="margin:0;font-size:16px;">本文プレビュー</h3>
+                                <div style="display:flex;gap:8px;">
+                                  <button class="btn-small" data-close>閉じる</button>
+                                </div>
+                            </div>
+                            <pre class="minutes-inline" style="white-space:pre-wrap;word-break:break-word;min-height:60px;opacity:.8;">読み込み中...</pre>
+                        </div>
+                    </td>`;
+                tr.after(detail);
+
+                const closeBtn = detail.querySelector('button[data-close]');
+                if (closeBtn) closeBtn.addEventListener('click', () => detail.remove());
+
+                const pre = detail.querySelector('pre.minutes-inline');
+                try {
+                    const r = await fetch(`/api/status?name=${encodeURIComponent(name)}`);
+                    if (!r.ok) {
+                        const t = await r.text();
+                        alert(`本文取得に失敗しました: ${r.status} ${t}`);
+                        detail.remove();
+                        return;
+                    }
+                    const j = await r.json();
+                    if (j.status === 'completed') {
+                        pre.textContent = j.minutes || '';
+                        pre.style.opacity = '1';
+                    } else if (j.status === 'forbidden') {
+                        alert('この議事録へのアクセス権がありません');
+                        detail.remove();
+                    } else {
+                        pre.textContent = `現在のステータス: ${j.status || 'unknown'}`;
+                        pre.style.opacity = '1';
+                    }
+                } catch (e) {
+                    console.error(e);
+                    alert('本文取得中にエラーが発生しました');
+                    detail.remove();
+                }
+            });
+        });
+        // タイトルクリックでも開く
+        tbody.querySelectorAll('[data-open]').forEach(el => {
+            el.addEventListener('click', async (e) => {
+                e.preventDefault();
+                const enc = el.getAttribute('data-open');
+                const name = decodeURIComponent(enc);
+                // すでに開いている詳細行を閉じる
+                tbody.querySelectorAll('tr.detail-row').forEach(r => r.remove());
+                // 本ボタンの行の次にプレースホルダーを挿入
+                const tr = el.closest('tr');
                 const detail = document.createElement('tr');
                 detail.className = 'detail-row';
                 detail.innerHTML = `
