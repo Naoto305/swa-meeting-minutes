@@ -115,6 +115,8 @@ const dropzone = document.getElementById('upload-dropzone');
 const fileInput = document.getElementById('file-input');
 const fileSelectBtn = document.getElementById('file-select-btn');
 const progressCard = document.getElementById('progress-card');
+// 一覧検索用キャッシュ
+let minutesListCache = [];
 
 if (dropzone) {
     dropzone.addEventListener('dragover', (e) => {
@@ -204,9 +206,34 @@ async function loadMinutesList() {
     try {
         const r = await fetch('/api/list-minutes');
         const j = await r.json();
-        const tbody = document.querySelector('.data-table tbody');
-        if (!tbody) return;
-        tbody.innerHTML = (j.minutes || []).map(m => {
+        minutesListCache = Array.isArray(j.minutes) ? j.minutes : [];
+        renderMinutesTable(minutesListCache);
+        bindSearchIfNeeded();
+    } catch (e) { console.error(e); }
+}
+
+function bindSearchIfNeeded() {
+    const input = document.querySelector('#list-section .search-input');
+    if (!input || input.dataset.bound === '1') return;
+    input.dataset.bound = '1';
+    input.addEventListener('input', () => {
+        const q = (input.value || '').toLowerCase().trim();
+        if (!q) {
+            renderMinutesTable(minutesListCache);
+            return;
+        }
+        const filtered = minutesListCache.filter(m => {
+            const t = (m.title || m.name || '').toLowerCase();
+            return t.includes(q);
+        });
+        renderMinutesTable(filtered);
+    });
+}
+
+function renderMinutesTable(items) {
+    const tbody = document.querySelector('.data-table tbody');
+    if (!tbody) return;
+    tbody.innerHTML = (items || []).map(m => {
             const dt = m.last_modified ? new Date(m.last_modified).toLocaleString() : '';
             return `<tr>
                 <td>
@@ -425,7 +452,6 @@ async function loadMinutesList() {
                 }
             });
         });
-    } catch (e) { console.error(e); }
 }
 
 async function fetchAndShowByName(name) {
