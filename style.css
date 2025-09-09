@@ -419,6 +419,21 @@ body {
     position: relative;
 }
 
+.table-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.select-input {
+    padding: 8px 10px;
+    border: 1px solid var(--border-medium);
+    border-radius: 8px;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font-size: 14px;
+}
+
 .search-input {
     padding: 8px 12px 8px 36px;
     border: 1px solid var(--border-medium);
@@ -573,6 +588,21 @@ body {
         flex-direction: column;
         gap: 16px;
         align-items: stretch;
+    }
+
+    .table-controls {
+        justify-content: flex-start;
+    }
+
+    .select-input {
+        width: 100%;
+    }
+
+    .pagination {
+        width: 100%;
+        display: flex;
+        justify-content: space-between;
+        margin-top: 8px;
     }
 
     .data-table {

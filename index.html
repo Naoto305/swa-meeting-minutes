@@ -121,16 +121,29 @@
                 </div>
 
                 <div class="table-container">
-                    <div class="table-header">
-                        <h2 class="table-title">最近の議事録</h2>
-                        <div class="search-container">
-                            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                <circle cx="11" cy="11" r="8" stroke-linecap="round" stroke-linejoin="round"/>
-                                <path d="m21 21-4.35-4.35" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                            <input type="text" class="search-input" placeholder="議事録を検索...">
+                        <div class="table-header">
+                            <h2 class="table-title">最近の議事録</h2>
+                            <div class="search-container">
+                                <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                    <circle cx="11" cy="11" r="8" stroke-linecap="round" stroke-linejoin="round"/>
+                                    <path d="m21 21-4.35-4.35" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                                <input type="text" class="search-input" placeholder="議事録を検索...">
+                            </div>
+                            <div class="table-controls">
+                                <select id="sort-select" class="select-input" aria-label="並び替え">
+                                    <option value="last_modified:desc">更新日時(新しい順)</option>
+                                    <option value="last_modified:asc">更新日時(古い順)</option>
+                                    <option value="title:asc">タイトル(A→Z)</option>
+                                    <option value="title:desc">タイトル(Z→A)</option>
+                                </select>
+                                <select id="size-select" class="select-input" aria-label="ページサイズ">
+                                    <option value="10">10件</option>
+                                    <option value="20" selected>20件</option>
+                                    <option value="50">50件</option>
+                                </select>
+                            </div>
                         </div>
-                    </div>
 
                     <table class="data-table">
                         <thead>
@@ -143,6 +156,13 @@
                         </thead>
                         <tbody></tbody>
                     </table>
+                    <div class="table-footer">
+                        <div class="pagination">
+                            <button class="btn-small" id="page-prev">前へ</button>
+                            <span id="page-info" style="min-width:120px;display:inline-block;text-align:center;">1 / 1</span>
+                            <button class="btn-small" id="page-next">次へ</button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </main>

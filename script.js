@@ -115,8 +115,9 @@ const dropzone = document.getElementById('upload-dropzone');
 const fileInput = document.getElementById('file-input');
 const fileSelectBtn = document.getElementById('file-select-btn');
 const progressCard = document.getElementById('progress-card');
-// 一覧検索用キャッシュ
+// 一覧の状態
 let minutesListCache = [];
+const listState = { sort: 'last_modified', order: 'desc', page: 1, size: 20, q: '' };
 
 if (dropzone) {
     dropzone.addEventListener('dragover', (e) => {
@@ -204,11 +205,19 @@ async function pollStatus(jobId) {
 
 async function loadMinutesList() {
     try {
-        const r = await fetch('/api/list-minutes');
+        const params = new URLSearchParams({
+            sort: listState.sort,
+            order: listState.order,
+            page: String(listState.page),
+            size: String(listState.size),
+        });
+        if (listState.q) params.set('q', listState.q);
+        const r = await fetch(`/api/list-minutes?${params.toString()}`);
         const j = await r.json();
         minutesListCache = Array.isArray(j.minutes) ? j.minutes : [];
         renderMinutesTable(minutesListCache);
         bindSearchIfNeeded();
+        bindListControlsIfNeeded(j.total || 0);
     } catch (e) { console.error(e); }
 }
 
@@ -217,17 +226,53 @@ function bindSearchIfNeeded() {
     if (!input || input.dataset.bound === '1') return;
     input.dataset.bound = '1';
     input.addEventListener('input', () => {
-        const q = (input.value || '').toLowerCase().trim();
-        if (!q) {
-            renderMinutesTable(minutesListCache);
-            return;
-        }
-        const filtered = minutesListCache.filter(m => {
-            const t = (m.title || m.name || '').toLowerCase();
-            return t.includes(q);
-        });
-        renderMinutesTable(filtered);
+        listState.q = (input.value || '').trim();
+        listState.page = 1;
+        loadMinutesList();
     });
+}
+
+function bindListControlsIfNeeded(total) {
+    const sortSel = document.getElementById('sort-select');
+    const sizeSel = document.getElementById('size-select');
+    const prev = document.getElementById('page-prev');
+    const next = document.getElementById('page-next');
+    const info = document.getElementById('page-info');
+    if (sortSel && sortSel.dataset.bound !== '1') {
+        sortSel.dataset.bound = '1';
+        sortSel.addEventListener('change', () => {
+            const val = sortSel.value || 'last_modified:desc';
+            const [s, o] = val.split(':');
+            listState.sort = s; listState.order = o || 'desc';
+            listState.page = 1;
+            loadMinutesList();
+        });
+    }
+    if (sizeSel && sizeSel.dataset.bound !== '1') {
+        sizeSel.dataset.bound = '1';
+        sizeSel.addEventListener('change', () => {
+            listState.size = parseInt(sizeSel.value || '20', 10) || 20;
+            listState.page = 1;
+            loadMinutesList();
+        });
+    }
+    if (prev && prev.dataset.bound !== '1') {
+        prev.dataset.bound = '1';
+        prev.addEventListener('click', () => {
+            if (listState.page > 1) { listState.page -= 1; loadMinutesList(); }
+        });
+    }
+    if (next && next.dataset.bound !== '1') {
+        next.dataset.bound = '1';
+        next.addEventListener('click', () => {
+            const totalPages = Math.max(1, Math.ceil(total / listState.size));
+            if (listState.page < totalPages) { listState.page += 1; loadMinutesList(); }
+        });
+    }
+    if (info) {
+        const totalPages = Math.max(1, Math.ceil(total / listState.size));
+        info.textContent = `${listState.page} / ${totalPages}`;
+    }
 }
 
 function renderMinutesTable(items) {
@@ -253,6 +298,8 @@ function renderMinutesTable(items) {
                     <button class="btn-small" data-download="${encodeURIComponent(m.name)}">ダウンロード</button>
                     <button class="btn-small" data-translate="${encodeURIComponent(m.name)}">翻訳</button>
                     <button class="btn-small" data-regenerate="${encodeURIComponent(m.name)}">再生成</button>
+                    <button class="btn-small" data-edit-title="${encodeURIComponent(m.name)}">タイトル編集</button>
+                    <button class="btn-small" data-delete="${encodeURIComponent(m.name)}">削除</button>
                   </div>
                 </td>
             </tr>`;
@@ -449,6 +496,44 @@ function renderMinutesTable(items) {
                     alert('翻訳中にエラーが発生しました');
                     detail.remove();
                 }
+            });
+        });
+
+        // タイトル編集
+        tbody.querySelectorAll('button[data-edit-title]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const name = decodeURIComponent(btn.getAttribute('data-edit-title'));
+                const current = btn.closest('tr')?.querySelector('td:first-child')?.innerText.trim();
+                const title = window.prompt('新しいタイトルを入力してください', current || '');
+                if (title == null) return;
+                try {
+                    const r = await fetch('/api/update-minutes', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name, title })
+                    });
+                    if (!r.ok) { alert(await r.text()); return; }
+                    await loadMinutesList();
+                } catch (e) { console.error(e); alert('更新に失敗しました'); }
+            });
+        });
+
+        // 削除
+        tbody.querySelectorAll('button[data-delete]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const name = decodeURIComponent(btn.getAttribute('data-delete'));
+                if (!confirm('この議事録を削除しますか？')) return;
+                try {
+                    const r = await fetch('/api/delete-minutes', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name })
+                    });
+                    if (!r.ok) { alert(await r.text()); return; }
+                    // ページ末尾で0件になったら前のページに戻る
+                    if (minutesListCache.length <= 1 && listState.page > 1) listState.page -= 1;
+                    await loadMinutesList();
+                } catch (e) { console.error(e); alert('削除に失敗しました'); }
             });
         });
 }

@@ -310,6 +310,21 @@ def list_minutes(req: func.HttpRequest) -> func.HttpResponse:
         blob_service = BlobServiceClient.from_connection_string(minutes_connect_str)
         container = blob_service.get_container_client(MINUTES_CONTAINER)
 
+        # Optional query params: q, sort (last_modified|title|name), order (asc|desc), page (1-based), size
+        q = (req.params.get('q') or '').strip()
+        sort = (req.params.get('sort') or 'last_modified').lower()
+        order = (req.params.get('order') or 'desc').lower()
+        try:
+            page = int(req.params.get('page') or '1')
+            page = page if page > 0 else 1
+        except Exception:
+            page = 1
+        try:
+            size = int(req.params.get('size') or '20')
+            size = size if 1 <= size <= 200 else 20
+        except Exception:
+            size = 20
+
         items = []
         # List only the current user's folder if available; otherwise list all and filter
         name_prefix = f"users/{current_user_id}/" if current_user_id else None
@@ -341,18 +356,46 @@ def list_minutes(req: func.HttpRequest) -> func.HttpResponse:
             except Exception as e:
                 logging.warning(f"Failed to get last_modified for {name}: {e}")
 
+            # Title from metadata if present (base64-encoded to support non-ASCII)
+            title = base
+            try:
+                meta = getattr(b, 'metadata', None) or {}
+                tb64 = meta.get('title_b64') or meta.get('display_title_b64')
+                if tb64:
+                    title = base64.b64decode(tb64).decode('utf-8')
+            except Exception:
+                pass
+
             items.append({
-                'name': name,               # full blob path
-                'title': base,              # display name only
+                'name': name,
+                'title': title,
                 'last_modified': last_modified,
-                'job_id': job_id            # derived from base filename
+                'job_id': job_id
             })
 
-        # Sort by last_modified desc if available
-        items.sort(key=lambda x: x['last_modified'] or '', reverse=True)
+        # Filter by q (title or name)
+        if q:
+            ql = q.lower()
+            items = [it for it in items if (it.get('title') or '').lower().find(ql) >= 0 or (it.get('name') or '').lower().find(ql) >= 0]
+
+        # Sort
+        def sort_key(it):
+            if sort == 'title':
+                return (it.get('title') or '').lower()
+            if sort == 'name':
+                return (it.get('name') or '').lower()
+            return it.get('last_modified') or ''
+        reverse = (order != 'asc')
+        items.sort(key=sort_key, reverse=reverse)
+
+        total = len(items)
+        # Pagination
+        start = (page - 1) * size
+        end = start + size
+        items_page = items[start:end]
 
         return func.HttpResponse(
-            json.dumps({'minutes': items}, ensure_ascii=False),
+            json.dumps({'minutes': items_page, 'total': total, 'page': page, 'size': size}, ensure_ascii=False),
             mimetype="application/json",
             status_code=200
         )
@@ -360,6 +403,127 @@ def list_minutes(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         logging.error(f"Error in list_minutes: {e}", exc_info=True)
         return func.HttpResponse("Failed to list minutes.", status_code=500)
+
+
+@app.route(route="update-minutes")
+def update_minutes(req: func.HttpRequest) -> func.HttpResponse:
+    """Update minutes metadata such as display title.
+
+    POST JSON: { "name": "...", "title": "..." }
+    """
+    try:
+        if req.method and req.method.upper() == 'GET':
+            return func.HttpResponse("Use POST with JSON body.", status_code=405)
+
+        body = req.get_json()
+        if not isinstance(body, dict):
+            return func.HttpResponse("Invalid JSON body.", status_code=400)
+        name = body.get('name')
+        title = body.get('title')
+        if not name or title is None:
+            return func.HttpResponse("Missing name or title.", status_code=400)
+
+        # Current user
+        auth_header = req.headers.get('X-MS-CLIENT-PRINCIPAL')
+        current_user_id = None
+        if auth_header:
+            try:
+                principal_json = base64.b64decode(auth_header).decode('utf-8')
+                principal = json.loads(principal_json)
+                current_user_id = principal.get('userId')
+            except Exception as e:
+                logging.warning(f"Failed to parse client principal in update-minutes: {e}")
+
+        minutes_connect_str = os.getenv('MINUTES_STORAGE_CONNECTION_STRING')
+        blob_service = BlobServiceClient.from_connection_string(minutes_connect_str)
+        blob_client = blob_service.get_blob_client(container=MINUTES_CONTAINER, blob=name)
+        if not blob_client.exists():
+            return func.HttpResponse("Not found.", status_code=404)
+
+        # Access check
+        if current_user_id:
+            try:
+                if name.startswith(f"users/{current_user_id}/") is False and name.startswith("users/"):
+                    return func.HttpResponse("Forbidden.", status_code=403)
+                props = blob_client.get_blob_properties()
+                owner = (props.metadata or {}).get('user_id')
+                if owner and owner != current_user_id:
+                    return func.HttpResponse("Forbidden.", status_code=403)
+            except Exception as e:
+                logging.warning(f"Access check failed in update-minutes: {e}")
+
+        # Update metadata (preserve existing keys)
+        props = blob_client.get_blob_properties()
+        meta = dict((props.metadata or {}))
+        try:
+            meta['title_b64'] = base64.b64encode((title or '').encode('utf-8')).decode('ascii')
+        except Exception:
+            meta['title_b64'] = ''
+        blob_client.set_blob_metadata(meta)
+
+        return func.HttpResponse(
+            json.dumps({'ok': True}),
+            mimetype="application/json",
+            status_code=200
+        )
+    except Exception as e:
+        logging.error(f"Error in update-minutes: {e}", exc_info=True)
+        return func.HttpResponse("Failed to update minutes.", status_code=500)
+
+
+@app.route(route="delete-minutes")
+def delete_minutes(req: func.HttpRequest) -> func.HttpResponse:
+    """Delete a minutes blob.
+
+    POST JSON: { "name": "..." }
+    """
+    try:
+        if req.method and req.method.upper() == 'GET':
+            return func.HttpResponse("Use POST with JSON body.", status_code=405)
+
+        body = req.get_json()
+        if not isinstance(body, dict):
+            return func.HttpResponse("Invalid JSON body.", status_code=400)
+        name = body.get('name')
+        if not name:
+            return func.HttpResponse("Missing name.", status_code=400)
+
+        # Current user
+        auth_header = req.headers.get('X-MS-CLIENT-PRINCIPAL')
+        current_user_id = None
+        if auth_header:
+            try:
+                principal_json = base64.b64decode(auth_header).decode('utf-8')
+                principal = json.loads(principal_json)
+                current_user_id = principal.get('userId')
+            except Exception as e:
+                logging.warning(f"Failed to parse client principal in delete-minutes: {e}")
+
+        minutes_connect_str = os.getenv('MINUTES_STORAGE_CONNECTION_STRING')
+        blob_service = BlobServiceClient.from_connection_string(minutes_connect_str)
+        blob_client = blob_service.get_blob_client(container=MINUTES_CONTAINER, blob=name)
+        if not blob_client.exists():
+            return func.HttpResponse("Not found.", status_code=404)
+
+        # Access check
+        if current_user_id:
+            try:
+                if name.startswith(f"users/{current_user_id}/") is False and name.startswith("users/"):
+                    return func.HttpResponse("Forbidden.", status_code=403)
+                props = blob_client.get_blob_properties()
+                owner = (props.metadata or {}).get('user_id')
+                if owner and owner != current_user_id:
+                    return func.HttpResponse("Forbidden.", status_code=403)
+            except Exception as e:
+                logging.warning(f"Access check failed in delete-minutes: {e}")
+
+        # Delete
+        blob_client.delete_blob(delete_snapshots="include")
+        return func.HttpResponse("Deleted.", status_code=200)
+
+    except Exception as e:
+        logging.error(f"Error in delete-minutes: {e}", exc_info=True)
+        return func.HttpResponse("Failed to delete minutes.", status_code=500)
 
 
 @app.route(route="status")
