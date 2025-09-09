@@ -6,7 +6,7 @@ import requests
 import uuid
 import base64
 import urllib.parse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from azure.storage.blob import (
     BlobServiceClient,
     generate_blob_sas,
@@ -386,6 +386,7 @@ def list_minutes(req: func.HttpRequest) -> func.HttpResponse:
                 start_dt = None
                 end_dt = None
                 if from_param:
+                    # naive UTC midnight
                     start_dt = datetime.strptime(from_param, '%Y-%m-%d')
                 if to_param:
                     # include the whole day
@@ -402,6 +403,9 @@ def list_minutes(req: func.HttpRequest) -> func.HttpResponse:
                             dt = datetime.strptime(iso.split('T')[0], '%Y-%m-%d')
                         except Exception:
                             return False
+                    # normalize: compare in naive UTC
+                    if dt.tzinfo is not None:
+                        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
                     if start_dt and dt < start_dt:
                         return False
                     if end_dt and dt >= end_dt:
