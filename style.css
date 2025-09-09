@@ -454,7 +454,7 @@ body {
 }
 
 .data-table th {
-    padding: 12px 50px;
+    padding: 12px 24px;
     text-align: left;
     font-size: 12px;
     font-weight: 600;
@@ -493,7 +493,7 @@ body {
 
 /* アクション列のボタンを統一サイズに */
 .table-actions .btn-small {
-    min-width: 80px;  /* 少し狭めて収まりやすく */
+    min-width: 94px;  /* 少し狭めて収まりやすく */
     height: 30px;
     padding: 0 10px;
     display: inline-flex;
