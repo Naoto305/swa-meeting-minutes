@@ -477,6 +477,7 @@ body {
 .table-actions {
     display: flex;
     gap: 8px;
+    flex-wrap: wrap; /* 枠内に収めるため改行を許可 */
 }
 
 .btn-small {
@@ -488,6 +489,16 @@ body {
     color: var(--text-primary);
     cursor: pointer;
     transition: var(--transition);
+}
+
+/* アクション列のボタンを統一サイズに */
+.table-actions .btn-small {
+    min-width: 80px;  /* 少し狭めて収まりやすく */
+    height: 30px;
+    padding: 0 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .btn-small:hover {

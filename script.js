@@ -246,7 +246,6 @@ function renderMinutesTable(items) {
                     </div>
                 </td>
                 <td>${dt}</td>
-                <td>-</td>
                 <td><span class="status-badge completed"><span class="status-dot"></span>完了</span></td>
                 <td>
                   <div class="table-actions">
@@ -273,7 +272,7 @@ function renderMinutesTable(items) {
                 const detail = document.createElement('tr');
                 detail.className = 'detail-row';
                 detail.innerHTML = `
-                    <td colspan="5">
+                    <td colspan="4">
                         <div class="card" style="margin-top:8px;">
                             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
                                 <h3 style="margin:0;font-size:16px;">本文プレビュー</h3>
@@ -391,7 +390,7 @@ function renderMinutesTable(items) {
                 const detail = document.createElement('tr');
                 detail.className = 'detail-row';
                 detail.innerHTML = `
-                    <td colspan="5">
+                    <td colspan="4">
                         <div class="card" style="margin-top:8px;">
                             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
                                 <h3 style="margin:0;font-size:16px;">翻訳プレビュー (${to})</h3>
