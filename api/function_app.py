@@ -310,10 +310,12 @@ def list_minutes(req: func.HttpRequest) -> func.HttpResponse:
         blob_service = BlobServiceClient.from_connection_string(minutes_connect_str)
         container = blob_service.get_container_client(MINUTES_CONTAINER)
 
-        # Optional query params: q, sort (last_modified|title|name), order (asc|desc), page (1-based), size
+        # Optional query params: q, sort (last_modified|title|name), order (asc|desc), page (1-based), size, from (YYYY-MM-DD), to (YYYY-MM-DD)
         q = (req.params.get('q') or '').strip()
         sort = (req.params.get('sort') or 'last_modified').lower()
         order = (req.params.get('order') or 'desc').lower()
+        from_param = (req.params.get('from') or '').strip()
+        to_param = (req.params.get('to') or '').strip()
         try:
             page = int(req.params.get('page') or '1')
             page = page if page > 0 else 1
@@ -377,6 +379,37 @@ def list_minutes(req: func.HttpRequest) -> func.HttpResponse:
         if q:
             ql = q.lower()
             items = [it for it in items if (it.get('title') or '').lower().find(ql) >= 0 or (it.get('name') or '').lower().find(ql) >= 0]
+
+        # Date filter (inclusive)
+        if from_param or to_param:
+            try:
+                start_dt = None
+                end_dt = None
+                if from_param:
+                    start_dt = datetime.strptime(from_param, '%Y-%m-%d')
+                if to_param:
+                    # include the whole day
+                    end_dt = datetime.strptime(to_param, '%Y-%m-%d') + timedelta(days=1)
+                def in_range(iso):
+                    if not iso:
+                        return False
+                    try:
+                        # iso may include timezone; fromisoformat handles "+00:00"
+                        dt = datetime.fromisoformat(iso.replace('Z', '+00:00'))
+                    except Exception:
+                        try:
+                            # fallback: take date part
+                            dt = datetime.strptime(iso.split('T')[0], '%Y-%m-%d')
+                        except Exception:
+                            return False
+                    if start_dt and dt < start_dt:
+                        return False
+                    if end_dt and dt >= end_dt:
+                        return False
+                    return True
+                items = [it for it in items if in_range(it.get('last_modified'))]
+            except Exception as e:
+                logging.warning(f"date filter ignored: {e}")
 
         # Sort
         def sort_key(it):

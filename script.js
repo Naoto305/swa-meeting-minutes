@@ -117,7 +117,7 @@ const fileSelectBtn = document.getElementById('file-select-btn');
 const progressCard = document.getElementById('progress-card');
 // 一覧の状態
 let minutesListCache = [];
-const listState = { sort: 'last_modified', order: 'desc', page: 1, size: 20, q: '' };
+const listState = { sort: 'last_modified', order: 'desc', page: 1, size: 20, q: '', from: '', to: '' };
 
 if (dropzone) {
     dropzone.addEventListener('dragover', (e) => {
@@ -212,6 +212,8 @@ async function loadMinutesList() {
             size: String(listState.size),
         });
         if (listState.q) params.set('q', listState.q);
+        if (listState.from) params.set('from', listState.from);
+        if (listState.to) params.set('to', listState.to);
         const r = await fetch(`/api/list-minutes?${params.toString()}`);
         const j = await r.json();
         minutesListCache = Array.isArray(j.minutes) ? j.minutes : [];
@@ -235,6 +237,8 @@ function bindSearchIfNeeded() {
 function bindListControlsIfNeeded(total) {
     const sortSel = document.getElementById('sort-select');
     const sizeSel = document.getElementById('size-select');
+    const fromInput = document.getElementById('from-date');
+    const toInput = document.getElementById('to-date');
     const prev = document.getElementById('page-prev');
     const next = document.getElementById('page-next');
     const info = document.getElementById('page-info');
@@ -252,6 +256,22 @@ function bindListControlsIfNeeded(total) {
         sizeSel.dataset.bound = '1';
         sizeSel.addEventListener('change', () => {
             listState.size = parseInt(sizeSel.value || '20', 10) || 20;
+            listState.page = 1;
+            loadMinutesList();
+        });
+    }
+    if (fromInput && fromInput.dataset.bound !== '1') {
+        fromInput.dataset.bound = '1';
+        fromInput.addEventListener('change', () => {
+            listState.from = fromInput.value || '';
+            listState.page = 1;
+            loadMinutesList();
+        });
+    }
+    if (toInput && toInput.dataset.bound !== '1') {
+        toInput.dataset.bound = '1';
+        toInput.addEventListener('change', () => {
+            listState.to = toInput.value || '';
             listState.page = 1;
             loadMinutesList();
         });
