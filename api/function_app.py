@@ -20,6 +20,7 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 AUDIO_CONTAINER = "audio"
 TRANSCRIPTS_CONTAINER = "transcripts"
 MINUTES_CONTAINER = "minutes"
+VIDEO_CONTAINER = "video"
 
 @app.route(route="upload")
 def upload_http_trigger(req: func.HttpRequest) -> func.HttpResponse:
@@ -51,14 +52,20 @@ def upload_http_trigger(req: func.HttpRequest) -> func.HttpResponse:
         original_filename = file.filename
         # Create a unique name for the blob to avoid overwrites
         base_name, extension = os.path.splitext(original_filename)
-        audio_filename = f"{base_name}_{uuid.uuid4()}{extension}"
+        blob_filename = f"{base_name}_{uuid.uuid4()}{extension}"
+
+        # Decide destination container (audio or video)
+        content_type = getattr(file, 'content_type', None) or req.headers.get('Content-Type', '')
+        ext_lower = (extension or '').lower()
+        video_exts = {'.mp4', '.mov', '.mkv', '.avi', '.wmv', '.webm', '.m4v'}
+        is_video = bool(content_type.startswith('video/') or ext_lower in video_exts)
+        dest_container = VIDEO_CONTAINER if is_video else AUDIO_CONTAINER
 
         connect_str = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
         blob_service_client = BlobServiceClient.from_connection_string(connect_str)
+        blob_client = blob_service_client.get_blob_client(container=dest_container, blob=blob_filename)
         
-        blob_client = blob_service_client.get_blob_client(container=AUDIO_CONTAINER, blob=audio_filename)
-        
-        logging.info(f"Uploading {audio_filename} to container {AUDIO_CONTAINER}.")
+        logging.info(f"Uploading {blob_filename} to container {dest_container}.")
         # Get file content from the stream
         file_content = file.read()
         blob_client.upload_blob(file_content, overwrite=True)
@@ -76,10 +83,14 @@ def upload_http_trigger(req: func.HttpRequest) -> func.HttpResponse:
         if user_details:
             metadata["user_details_b64"] = base64.b64encode(user_details.encode('utf-8')).decode('ascii')
         blob_client.set_blob_metadata(metadata)
-        logging.info(f"Metadata set for {audio_filename}.")
+        logging.info(f"Metadata set for {blob_filename}.")
 
         return func.HttpResponse(
-            json.dumps({'message': f'Audio file {original_filename} uploaded as {audio_filename}. Transcription will begin shortly.'}),
+            json.dumps({
+                'message': f'{"Video" if is_video else "Audio"} file {original_filename} uploaded as {blob_filename}.',
+                'container': dest_container,
+                'name': blob_filename
+            }, ensure_ascii=False),
             mimetype="application/json",
             status_code=202 # Accepted
         )
