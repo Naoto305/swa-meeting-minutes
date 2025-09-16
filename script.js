@@ -115,6 +115,8 @@ const dropzone = document.getElementById('upload-dropzone');
 const fileInput = document.getElementById('file-input');
 const fileSelectBtn = document.getElementById('file-select-btn');
 const progressCard = document.getElementById('progress-card');
+let progressTimer = null;
+let currentMinutesTotal = 0;
 const toastContainer = document.getElementById('toast-container');
 // 一覧の状態
 let minutesListCache = [];
@@ -159,6 +161,30 @@ function showToast(message, type = 'info', timeoutMs = 4000) {
     setTimeout(() => { div.remove(); }, timeoutMs);
 }
 
+function startProgress(titleText = '処理中...', initial = 10) {
+    if (!progressCard) return;
+    const title = progressCard.querySelector('.progress-title');
+    const fill = progressCard.querySelector('.progress-fill');
+    if (title) title.textContent = titleText;
+    if (fill) fill.style.width = `${initial}%`;
+    progressCard.style.display = 'block';
+}
+
+function setProgress(percent, titleText) {
+    if (!progressCard) return;
+    const title = progressCard.querySelector('.progress-title');
+    const fill = progressCard.querySelector('.progress-fill');
+    if (title && titleText) title.textContent = titleText;
+    if (fill) fill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+}
+
+function finishProgress(success = true, hideDelay = 1200) {
+    if (!progressCard) return;
+    setProgress(100, success ? '完了しました' : '処理を終了しました');
+    if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+    setTimeout(() => { progressCard.style.display = 'none'; }, hideDelay);
+}
+
 async function handleFileUpload(file) {
     console.log('Uploaded file:', file);
     progressCard.style.display = 'block';
@@ -177,16 +203,51 @@ async function handleFileUpload(file) {
         if (response.ok) {
             const result = await response.json();
             console.log('Upload successful:', result);
+            // 現在の件数を記録
+            try {
+                const r0 = await fetch('/api/list-minutes');
+                const j0 = await r0.json();
+                currentMinutesTotal = (j0 && typeof j0.total === 'number') ? j0.total : 0;
+            } catch (e) { currentMinutesTotal = 0; }
+
             if (result.container === 'video') {
-                showToast('動画を受け付けました。音声抽出→文字起こしを実行します（数分かかる場合があります）', 'info', 6000);
-                // しばらくの間、一覧を自動更新
-                let left = 10; // 10回（約5分）
-                const t = setInterval(async () => {
-                    try { await loadMinutesList(); } catch (e) {}
-                    if (--left <= 0) clearInterval(t);
+                showToast('動画を受け付けました。音声抽出→文字起こしを実行します。', 'info', 6000);
+                startProgress('音声抽出中...');
+                let pct = 10;
+                progressTimer = setInterval(() => {
+                    pct = Math.min(95, pct + 5);
+                    setProgress(pct);
+                }, 5000);
+                // しばらくの間、一覧を自動更新し、完了検知で進捗終了
+                let left = 12; // 約6分
+                const watcher = setInterval(async () => {
+                    try {
+                        const r = await fetch('/api/list-minutes');
+                        const j = await r.json();
+                        const total = (j && typeof j.total === 'number') ? j.total : (Array.isArray(j.minutes)? j.minutes.length : 0);
+                        if (total > currentMinutesTotal) {
+                            await loadMinutesList();
+                            finishProgress(true);
+                            clearInterval(watcher);
+                            showToast('議事録が生成されました', 'success');
+                            return;
+                        }
+                    } catch (e) { /* noop */ }
+                    if (--left <= 0) { clearInterval(watcher); finishProgress(false); }
                 }, 30000);
             } else {
                 showToast('アップロード完了。文字起こしを開始します。', 'success');
+                startProgress('文字起こし中...', 30);
+                let pct = 30;
+                progressTimer = setInterval(() => {
+                    pct = Math.min(95, pct + 5);
+                    setProgress(pct);
+                }, 5000);
+                // 軽めにポーリング
+                setTimeout(async () => {
+                    finishProgress();
+                    try { await loadMinutesList(); } catch (e) {}
+                }, 120000);
             }
             await loadMinutesList();
         } else {
@@ -441,6 +502,7 @@ function renderMinutesTable(items) {
                             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
                                 <h3 style="margin:0;font-size:16px;">本文プレビュー</h3>
                                 <div style="display:flex;gap:8px;">
+                                  <button class="btn-small" data-copy>コピー</button>
                                   <button class="btn-small" data-close>閉じる</button>
                                 </div>
                             </div>
@@ -451,6 +513,12 @@ function renderMinutesTable(items) {
 
                 const closeBtn = detail.querySelector('button[data-close]');
                 if (closeBtn) closeBtn.addEventListener('click', () => detail.remove());
+                const copyBtn = detail.querySelector('button[data-copy]');
+                if (copyBtn) copyBtn.addEventListener('click', () => {
+                    const pre = detail.querySelector('pre.minutes-inline');
+                    const txt = (pre && pre.textContent) ? pre.textContent : '';
+                    navigator.clipboard.writeText(txt).then(() => showToast('本文をコピーしました','success')).catch(()=>showToast('コピーに失敗しました','error'));
+                });
 
                 const pre = detail.querySelector('pre.minutes-inline');
                 try {
