@@ -548,6 +548,23 @@ body {
     background: var(--bg-secondary);
 }
 
+/* Toast */
+#toast-container .toast {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-top: 8px;
+    box-shadow: 0 6px 16px rgba(0,0,0,.08);
+    min-width: 260px;
+    max-width: 420px;
+}
+#toast-container .toast.info { border-left: 4px solid #0ea5e9; }
+#toast-container .toast.success { border-left: 4px solid #10a37f; }
+#toast-container .toast.warn { border-left: 4px solid #f59e0b; }
+#toast-container .toast.error { border-left: 4px solid #ef4444; }
+
 .status-badge {
     display: inline-flex;
     align-items: center;

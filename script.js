@@ -115,6 +115,7 @@ const dropzone = document.getElementById('upload-dropzone');
 const fileInput = document.getElementById('file-input');
 const fileSelectBtn = document.getElementById('file-select-btn');
 const progressCard = document.getElementById('progress-card');
+const toastContainer = document.getElementById('toast-container');
 // 一覧の状態
 let minutesListCache = [];
 const listState = { sort: 'last_modified', order: 'desc', page: 1, size: 20, q: '', from: '', to: '' };
@@ -149,6 +150,15 @@ if (dropzone) {
     });
 }
 
+function showToast(message, type = 'info', timeoutMs = 4000) {
+    if (!toastContainer) return;
+    const div = document.createElement('div');
+    div.className = `toast ${type}`;
+    div.textContent = message;
+    toastContainer.appendChild(div);
+    setTimeout(() => { div.remove(); }, timeoutMs);
+}
+
 async function handleFileUpload(file) {
     console.log('Uploaded file:', file);
     progressCard.style.display = 'block';
@@ -166,15 +176,26 @@ async function handleFileUpload(file) {
 
         if (response.ok) {
             const result = await response.json();
-            alert('ファイルのアップロードが完了しました。文字起こしを開始します。');
             console.log('Upload successful:', result);
+            if (result.container === 'video') {
+                showToast('動画を受け付けました。音声抽出→文字起こしを実行します（数分かかる場合があります）', 'info', 6000);
+                // しばらくの間、一覧を自動更新
+                let left = 10; // 10回（約5分）
+                const t = setInterval(async () => {
+                    try { await loadMinutesList(); } catch (e) {}
+                    if (--left <= 0) clearInterval(t);
+                }, 30000);
+            } else {
+                showToast('アップロード完了。文字起こしを開始します。', 'success');
+            }
+            await loadMinutesList();
         } else {
             const errorText = await response.text();
-            alert(`エラーが発生しました: ${errorText}`);
+            showToast(`エラーが発生しました: ${errorText}`, 'error', 6000);
             console.error('Upload failed:', errorText);
         }
     } catch (error) {
-        alert(`エラーが発生しました: ${error.message}`);
+        showToast(`エラーが発生しました: ${error.message}`, 'error', 6000);
         console.error('Upload error:', error);
     } finally {
         progressCard.style.display = 'none';
@@ -222,6 +243,22 @@ async function loadMinutesList() {
         bindListControlsIfNeeded(j.total || 0);
     } catch (e) { console.error(e); }
 }
+
+// 本文コピー
+document.addEventListener('click', (e) => {
+    const btn = e.target && e.target.id === 'copy-minutes-btn' ? e.target : null;
+    if (!btn) return;
+    const pre = document.getElementById('minutes-body');
+    if (!pre) return;
+    try {
+        const text = pre.textContent || '';
+        navigator.clipboard.writeText(text).then(() => {
+            showToast('本文をコピーしました', 'success');
+        }).catch(() => {
+            showToast('コピーに失敗しました', 'error');
+        });
+    } catch (err) { showToast('コピーに失敗しました', 'error'); }
+});
 
 function bindSearchIfNeeded() {
     const input = document.querySelector('#list-section .search-input');

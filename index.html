@@ -96,7 +96,10 @@
                         <input type="file" id="file-input" style="display: none;" accept="audio/*,video/*">
                     
                 <div class="card" id="minutes-card" style="display:none; margin-top:16px;">
-                    <h2>生成された議事録</h2>
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+                        <h2 style="margin:0;">生成された議事録</h2>
+                        <button class="btn-small" id="copy-minutes-btn" title="本文をコピー">コピー</button>
+                    </div>
                     <pre id="minutes-body" style="white-space:pre-wrap;word-break:break-word;"></pre>
                 </div>
 </div>
@@ -172,5 +175,7 @@
     </div>
 
     <script src="script.js"></script>
+    <!-- Toast container -->
+    <div id="toast-container" aria-live="polite" aria-atomic="true" style="position:fixed;right:16px;bottom:16px;z-index:2000;"></div>
 </body>
 </html>
