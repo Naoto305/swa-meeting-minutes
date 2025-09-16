@@ -141,6 +141,21 @@ def main():
         except Exception:
             meta = {}
 
+        # Ensure downstream functions have required metadata
+        try:
+            if 'original_prompt_b64' not in meta:
+                default_prompt = '議事録を日本語で要約してください。'
+                meta['original_prompt_b64'] = base64.b64encode(default_prompt.encode('utf-8')).decode('ascii')
+            if 'original_filename_b64' not in meta:
+                meta['original_filename_b64'] = base64.b64encode(os.path.basename(blob_name).encode('utf-8')).decode('ascii')
+            if 'user_id' not in meta and blob_name.startswith('users/'):
+                parts = blob_name.split('/')
+                if len(parts) >= 2 and parts[1]:
+                    meta['user_id'] = parts[1]
+        except Exception:
+            # If metadata enrichment fails, continue with whatever we have
+            pass
+
         with open(out_path, 'rb') as f:
             dst.upload_blob(
                 f,
