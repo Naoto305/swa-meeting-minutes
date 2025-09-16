@@ -6,6 +6,7 @@ import tempfile
 import subprocess
 import urllib.parse
 from datetime import datetime
+from typing import Tuple, Union
 
 from azure.storage.queue import QueueClient
 from azure.storage.blob import BlobServiceClient, ContentSettings
@@ -18,7 +19,7 @@ def get_env(name: str, default: str = None, required: bool = False) -> str:
     return val
 
 
-def parse_event_to_blob(url_or_event: str | dict) -> tuple[str, str]:
+def parse_event_to_blob(url_or_event: Union[str, dict]) -> Tuple[str, str]:
     """Return (container, blob_name) from Event Grid event or URL string."""
     if isinstance(url_or_event, dict):
         # Storage BlobCreated event
@@ -155,4 +156,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
