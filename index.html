@@ -92,7 +92,7 @@
                             </svg>
                             ファイルを選択
                         </button>
-                        <p class="supported-formats">対応形式（音声/動画）: MP3, WAV, M4A, AAC, OGG, WebM / MP4, MOV, MKV, AVI, WMV, M4V（最大100MB）</p>
+                        <p class="supported-formats">対応形式（音声/動画）: MP3, WAV, M4A, AAC, OGG, WebM / MP4, MOV, MKV, AVI, WMV, M4V（最大1GB）</p>
                         <input type="file" id="file-input" style="display: none;" accept="audio/*,video/*">
                     
                 <div class="card" id="minutes-card" style="display:none; margin-top:16px;">
@@ -174,6 +174,7 @@
         </main>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/azure-storage-blob/12.16.0/azure-storage-blob.min.js" integrity="sha512-8v4kJ/3Z8cYw9v3+q0N9zvN5nO9gG9kTt2bUQKJtYqvUjB3gq8z5p7z7r2mYc0bC8k7G8S0m3r4x2QfWlq0Tw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="script.js"></script>
     <!-- Toast container -->
     <div id="toast-container" aria-live="polite" aria-atomic="true" style="position:fixed;right:16px;bottom:16px;z-index:2000;"></div>

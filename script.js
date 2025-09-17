@@ -122,7 +122,7 @@ const toastContainer = document.getElementById('toast-container');
 let minutesListCache = [];
 const listState = { sort: 'last_modified', order: 'desc', page: 1, size: 20, q: '', from: '', to: '' };
 
-const MAX_FILE_BYTES = 100 * 1024 * 1024; // 100MB 上限
+const MAX_FILE_BYTES = 1024 * 1024 * 1024; // 1GB 上限
 
 if (dropzone) {
     dropzone.addEventListener('dragover', (e) => {
@@ -195,7 +195,7 @@ function finishProgress(success = true, hideDelay = 1200) {
 
 async function handleFileUpload(file) {
     if (file && file.size > MAX_FILE_BYTES) {
-        showToast('ファイルサイズが上限(100MB)を超えています', 'warn', 6000);
+        showToast('ファイルサイズが上限(1GB)を超えています', 'warn', 6000);
         return;
     }
     console.log('Uploaded file:', file);
@@ -212,15 +212,41 @@ async function handleFileUpload(file) {
         if (sasResp.ok) {
             const sasInfo = await sasResp.json();
             const uploadUrl = sasInfo.uploadUrl;
-            const headers = sasInfo.headers || {};
-            // PUTでBlockBlobとしてアップロード
-            const putResp = await fetch(uploadUrl, { method: 'PUT', headers, body: file });
-            if (!putResp.ok && putResp.status !== 201) {
-                // フォールバックに進む
-                throw new Error(`SAS PUT failed: ${putResp.status}`);
+            const headers = (sasInfo.headers || {});
+
+            // 分割アップロード（Block Blob / 並列）
+            try {
+                startProgress('アップロード中...', 5);
+                const client = new azblob.BlockBlobClient(uploadUrl);
+                // ヘッダーから content-type / metadata を抽出（あれば）
+                const lower = Object.fromEntries(Object.entries(headers).map(([k, v]) => [String(k).toLowerCase(), v]));
+                const blobHTTPHeaders = {
+                    blobContentType: lower['x-ms-blob-content-type'] || lower['content-type'] || (file.type || 'application/octet-stream'),
+                };
+                const metadata = {};
+                for (const [k, v] of Object.entries(lower)) {
+                    if (k.startsWith('x-ms-meta-')) {
+                        metadata[k.substring('x-ms-meta-'.length)] = v;
+                    }
+                }
+                await client.uploadData(file, {
+                    blockSize: 8 * 1024 * 1024, // 8MB チャンク
+                    concurrency: 4,
+                    blobHTTPHeaders,
+                    metadata,
+                    onProgress: (ev) => {
+                        if (file && ev && typeof ev.loadedBytes === 'number' && file.size > 0) {
+                            const pct = Math.floor((ev.loadedBytes / file.size) * 100);
+                            setProgress(pct, 'アップロード中...');
+                        }
+                    }
+                });
+            } catch (e) {
+                throw new Error(`Chunked upload failed: ${e.message || e}`);
             }
+
             const result = sasInfo;
-            console.log('Direct upload successful:', result);
+            console.log('Direct upload successful (chunked):', result);
             // 現在の件数を記録
             try {
                 const r0 = await fetch('/api/list-minutes');
