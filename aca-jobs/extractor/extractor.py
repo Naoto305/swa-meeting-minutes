@@ -72,7 +72,7 @@ def main():
     queue_name = get_env('QUEUE_NAME', 'q-video-extract')
 
     queue = QueueClient.from_connection_string(storage_conn, queue_name)
-    messages = queue.receive_messages(visibility_timeout=60 * 10)  # 10 minutes lock
+    messages = queue.receive_messages(visibility_timeout=60 * 20)  # 20 minutes lock
     msg = None
     try:
         msg = next(messages)
