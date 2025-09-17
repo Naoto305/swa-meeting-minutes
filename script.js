@@ -122,6 +122,8 @@ const toastContainer = document.getElementById('toast-container');
 let minutesListCache = [];
 const listState = { sort: 'last_modified', order: 'desc', page: 1, size: 20, q: '', from: '', to: '' };
 
+const MAX_FILE_BYTES = 100 * 1024 * 1024; // 100MB 上限
+
 if (dropzone) {
     dropzone.addEventListener('dragover', (e) => {
         e.preventDefault();
@@ -147,7 +149,13 @@ if (dropzone) {
 
     fileInput.addEventListener('change', () => {
         if (fileInput.files.length > 0) {
-            handleFileUpload(fileInput.files[0]);
+            const f = fileInput.files[0];
+            if (f.size > MAX_FILE_BYTES) {
+                showToast('ファイルサイズが上限(100MB)を超えています', 'warn', 6000);
+                fileInput.value = '';
+                return;
+            }
+            handleFileUpload(f);
         }
     });
 }
@@ -186,6 +194,10 @@ function finishProgress(success = true, hideDelay = 1200) {
 }
 
 async function handleFileUpload(file) {
+    if (file && file.size > MAX_FILE_BYTES) {
+        showToast('ファイルサイズが上限(100MB)を超えています', 'warn', 6000);
+        return;
+    }
     console.log('Uploaded file:', file);
     progressCard.style.display = 'block';
 
