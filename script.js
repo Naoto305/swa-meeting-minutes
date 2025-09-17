@@ -124,6 +124,72 @@ const listState = { sort: 'last_modified', order: 'desc', page: 1, size: 20, q: 
 
 const MAX_FILE_BYTES = 1024 * 1024 * 1024; // 1GB 上限
 
+// ブラウザのみでの分割アップロード（Put Block / Put Block List）
+async function uploadBlobChunked(uploadUrl, file, options = {}) {
+    const blockSize = options.blockSize || (8 * 1024 * 1024); // 8MB
+    const concurrency = options.concurrency || 4; // 並列数（シンプルに1でも可）
+    const onProgress = options.onProgress || (() => {});
+    const headersInput = (options.headers || {});
+    const lower = Object.fromEntries(Object.entries(headersInput).map(([k, v]) => [String(k).toLowerCase(), v]));
+
+    // Put Block: クエリ comp=block & blockid=BASE64
+    const mkUrl = (suffix) => uploadUrl + (uploadUrl.includes('?') ? '&' : '?') + suffix;
+
+    const total = file.size;
+    const blockIds = [];
+    let uploaded = 0;
+
+    // 0埋めのブロックID（最大5桁= ~88GBまで想定）
+    const makeBlockId = (i) => btoa(String(i).padStart(5, '0'));
+
+    // 並列アップロード用のポインタ
+    let index = 0;
+    const totalBlocks = Math.ceil(total / blockSize);
+
+    async function worker() {
+        while (true) {
+            const i = index++;
+            if (i >= totalBlocks) break;
+            const start = i * blockSize;
+            const end = Math.min(total, start + blockSize);
+            const chunk = file.slice(start, end);
+            const blockId = makeBlockId(i);
+            const url = mkUrl(`comp=block&blockid=${encodeURIComponent(blockId)}`);
+
+            const resp = await fetch(url, { method: 'PUT', body: chunk });
+            if (!resp.ok) {
+                const text = await resp.text().catch(() => '');
+                throw new Error(`Put Block failed (${resp.status}): ${text}`);
+            }
+            blockIds[i] = blockId; // インデックス順に保持
+            uploaded += chunk.size;
+            onProgress({ loadedBytes: uploaded, totalBytes: total });
+        }
+    }
+
+    const workers = Array.from({ length: concurrency }, () => worker());
+    await Promise.all(workers);
+
+    // Put Block List でコミット（ここで Content-Type / metadata を設定）
+    const xml = `<?xml version="1.0" encoding="utf-8"?>\n<BlockList>\n${blockIds.map(id => `  <Latest>${id}</Latest>`).join('\n')}\n</BlockList>`;
+    const commitHeaders = new Headers({ 'Content-Type': 'application/xml' });
+    // Content-Type 反映
+    const contentType = lower['x-ms-blob-content-type'] || lower['content-type'] || (file.type || 'application/octet-stream');
+    commitHeaders.set('x-ms-blob-content-type', contentType);
+    // メタデータ反映（x-ms-meta-* -> key:value）
+    for (const [k, v] of Object.entries(lower)) {
+        if (k.startsWith('x-ms-meta-')) {
+            commitHeaders.set(k, v);
+        }
+    }
+    const commitUrl = mkUrl('comp=blocklist');
+    const commitResp = await fetch(commitUrl, { method: 'PUT', headers: commitHeaders, body: xml });
+    if (!commitResp.ok) {
+        const t = await commitResp.text().catch(() => '');
+        throw new Error(`Put Block List failed (${commitResp.status}): ${t}`);
+    }
+}
+
 if (dropzone) {
     dropzone.addEventListener('dragover', (e) => {
         e.preventDefault();
@@ -214,26 +280,13 @@ async function handleFileUpload(file) {
             const uploadUrl = sasInfo.uploadUrl;
             const headers = (sasInfo.headers || {});
 
-            // 分割アップロード（Block Blob / 並列）
+            // 分割アップロード（SDKなし、ネイティブfetchベース）
             try {
                 startProgress('アップロード中...', 5);
-                const client = new azblob.BlockBlobClient(uploadUrl);
-                // ヘッダーから content-type / metadata を抽出（あれば）
-                const lower = Object.fromEntries(Object.entries(headers).map(([k, v]) => [String(k).toLowerCase(), v]));
-                const blobHTTPHeaders = {
-                    blobContentType: lower['x-ms-blob-content-type'] || lower['content-type'] || (file.type || 'application/octet-stream'),
-                };
-                const metadata = {};
-                for (const [k, v] of Object.entries(lower)) {
-                    if (k.startsWith('x-ms-meta-')) {
-                        metadata[k.substring('x-ms-meta-'.length)] = v;
-                    }
-                }
-                await client.uploadData(file, {
-                    blockSize: 8 * 1024 * 1024, // 8MB チャンク
+                await uploadBlobChunked(uploadUrl, file, {
+                    blockSize: 8 * 1024 * 1024,
                     concurrency: 4,
-                    blobHTTPHeaders,
-                    metadata,
+                    headers,
                     onProgress: (ev) => {
                         if (file && ev && typeof ev.loadedBytes === 'number' && file.size > 0) {
                             const pct = Math.floor((ev.loadedBytes / file.size) * 100);
@@ -246,7 +299,7 @@ async function handleFileUpload(file) {
             }
 
             const result = sasInfo;
-            console.log('Direct upload successful (chunked):', result);
+            console.log('Direct upload successful (chunked native):', result);
             // 現在の件数を記録
             try {
                 const r0 = await fetch('/api/list-minutes');
