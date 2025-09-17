@@ -22,6 +22,115 @@ TRANSCRIPTS_CONTAINER = "transcripts"
 MINUTES_CONTAINER = "minutes"
 VIDEO_CONTAINER = "video"
 
+@app.route(route="upload-sas")
+def get_upload_sas(req: func.HttpRequest) -> func.HttpResponse:
+    """Issue a short-lived SAS URL for direct blob upload from the client.
+
+    Accepts JSON or query params:
+      - filename: original file name (to decide extension)
+      - contentType: optional content type (to decide container)
+
+    Returns JSON with:
+      - uploadUrl: SAS URL for PUT upload (BlockBlob)
+      - container, name, isVideo
+      - headers: recommended headers to include (x-ms-blob-type, Content-Type, x-ms-meta-*)
+    """
+    try:
+        # Authentication (Easy Auth)
+        auth_header = req.headers.get('X-MS-CLIENT-PRINCIPAL')
+        if not auth_header:
+            return func.HttpResponse("Unauthorized: User not authenticated.", status_code=401)
+        user_id = None
+        user_details = None
+        try:
+            principal_json = base64.b64decode(auth_header).decode('utf-8')
+            principal = json.loads(principal_json)
+            user_id = principal.get('userId')
+            user_details = principal.get('userDetails')
+        except Exception as e:
+            logging.warning(f"Failed to parse client principal in upload-sas: {e}")
+
+        # Input
+        body = None
+        try:
+            if req.get_body():
+                body = req.get_json()
+        except Exception:
+            body = None
+        filename = (req.params.get('filename') or (body or {}).get('filename') or '').strip()
+        content_type = (req.params.get('contentType') or (body or {}).get('contentType') or '').strip()
+        if not filename:
+            return func.HttpResponse("Missing filename.", status_code=400)
+
+        base_name, extension = os.path.splitext(filename)
+        # Generate unique blob name (root-level to match downstream logic)
+        blob_filename = f"{(base_name or 'upload').strip()}_{uuid.uuid4()}{extension}"
+
+        # Decide destination container (audio or video)
+        video_exts = {'.mp4', '.mov', '.mkv', '.avi', '.wmv', '.webm', '.m4v'}
+        is_video = bool((content_type or '').startswith('video/') or (extension or '').lower() in video_exts)
+        dest_container = VIDEO_CONTAINER if is_video else AUDIO_CONTAINER
+
+        # Build SAS
+        connect_str = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
+        if not connect_str:
+            return func.HttpResponse("Server storage not configured.", status_code=500)
+        bsc = BlobServiceClient.from_connection_string(connect_str)
+        account_name = bsc.account_name
+        account_key = bsc.credential.account_key
+        if not account_key:
+            return func.HttpResponse("Missing account key for SAS.", status_code=500)
+
+        now = datetime.utcnow()
+        sas = generate_blob_sas(
+            account_name=account_name,
+            container_name=dest_container,
+            blob_name=blob_filename,
+            account_key=account_key,
+            permission=BlobSasPermissions(create=True, write=True, add=True, read=True),
+            expiry=now + timedelta(minutes=30),
+            start=now - timedelta(minutes=5)
+        )
+
+        # Construct URL
+        # Respect custom domain if set via environment (optional)
+        custom_blob_endpoint = os.getenv('BLOB_PRIMARY_ENDPOINT')  # e.g., https://<acct>.blob.core.windows.net
+        if custom_blob_endpoint:
+            base_url = custom_blob_endpoint.rstrip('/')
+        else:
+            base_url = f"https://{account_name}.blob.core.windows.net"
+        upload_url = f"{base_url}/{dest_container}/{urllib.parse.quote(blob_filename)}?{sas}"
+
+        # Prepare recommended headers for client upload
+        prompt_default = '議事録を日本語で要約してください。'
+        headers = {
+            'x-ms-blob-type': 'BlockBlob',
+            'Content-Type': content_type or 'application/octet-stream',
+            # Metadata (ASCII-only; non-ASCII encoded as Base64 like server-side path)
+            'x-ms-meta-original_prompt_b64': base64.b64encode(prompt_default.encode('utf-8')).decode('ascii'),
+            'x-ms-meta-original_filename_b64': base64.b64encode((filename or '').encode('utf-8')).decode('ascii')
+        }
+        if user_id:
+            headers['x-ms-meta-user_id'] = user_id
+        if user_details:
+            try:
+                headers['x-ms-meta-user_details_b64'] = base64.b64encode(user_details.encode('utf-8')).decode('ascii')
+            except Exception:
+                headers['x-ms-meta-user_details_b64'] = ''
+
+        resp = {
+            'uploadUrl': upload_url,
+            'container': dest_container,
+            'name': blob_filename,
+            'isVideo': is_video,
+            'headers': headers
+        }
+        return func.HttpResponse(json.dumps(resp, ensure_ascii=False), mimetype="application/json", status_code=200)
+
+    except Exception as e:
+        logging.error(f"Error in upload-sas: {e}", exc_info=True)
+        return func.HttpResponse("Failed to issue upload SAS.", status_code=500)
+
 @app.route(route="upload")
 def upload_http_trigger(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function processed an upload request.')

@@ -201,20 +201,26 @@ async function handleFileUpload(file) {
     console.log('Uploaded file:', file);
     progressCard.style.display = 'block';
 
-    const formData = new FormData();
-    formData.append('file', file);
-
     try {
-        // Azure Functionsのエンドポイント '/api/upload' にファイルをPOST
-        const response = await fetch('/api/upload', {
+        // まずはSAS直アップロードを試行
+        const sasResp = await fetch('/api/upload-sas', {
             method: 'POST',
-            body: formData,
-            // Easy Auth使用時は認証情報が自動で付与されるため、手動でのヘッダー設定は不要
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: file.name || 'upload.bin', contentType: file.type || '' })
         });
 
-        if (response.ok) {
-            const result = await response.json();
-            console.log('Upload successful:', result);
+        if (sasResp.ok) {
+            const sasInfo = await sasResp.json();
+            const uploadUrl = sasInfo.uploadUrl;
+            const headers = sasInfo.headers || {};
+            // PUTでBlockBlobとしてアップロード
+            const putResp = await fetch(uploadUrl, { method: 'PUT', headers, body: file });
+            if (!putResp.ok && putResp.status !== 201) {
+                // フォールバックに進む
+                throw new Error(`SAS PUT failed: ${putResp.status}`);
+            }
+            const result = sasInfo;
+            console.log('Direct upload successful:', result);
             // 現在の件数を記録
             try {
                 const r0 = await fetch('/api/list-minutes');
@@ -256,6 +262,65 @@ async function handleFileUpload(file) {
                     setProgress(pct);
                 }, 5000);
                 // 軽めにポーリング
+                setTimeout(async () => {
+                    finishProgress();
+                    try { await loadMinutesList(); } catch (e) {}
+                }, 120000);
+            }
+            await loadMinutesList();
+            return; // SAS 成功時はここで終了
+        }
+
+        // フォールバック: 既存のAPIアップロード
+        const formData = new FormData();
+        formData.append('file', file);
+        const response = await fetch('/api/upload', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            console.log('Upload successful (fallback):', result);
+            // 現在の件数を記録
+            try {
+                const r0 = await fetch('/api/list-minutes');
+                const j0 = await r0.json();
+                currentMinutesTotal = (j0 && typeof j0.total === 'number') ? j0.total : 0;
+            } catch (e) { currentMinutesTotal = 0; }
+
+            if (result.container === 'video') {
+                showToast('動画を受け付けました。音声抽出→文字起こしを実行します。', 'info', 6000);
+                startProgress('音声抽出中...');
+                let pct = 10;
+                progressTimer = setInterval(() => {
+                    pct = Math.min(95, pct + 5);
+                    setProgress(pct);
+                }, 5000);
+                let left = 12;
+                const watcher = setInterval(async () => {
+                    try {
+                        const r = await fetch('/api/list-minutes');
+                        const j = await r.json();
+                        const total = (j && typeof j.total === 'number') ? j.total : (Array.isArray(j.minutes)? j.minutes.length : 0);
+                        if (total > currentMinutesTotal) {
+                            await loadMinutesList();
+                            finishProgress(true);
+                            clearInterval(watcher);
+                            showToast('議事録が生成されました', 'success');
+                            return;
+                        }
+                    } catch (e) { /* noop */ }
+                    if (--left <= 0) { clearInterval(watcher); finishProgress(false); }
+                }, 30000);
+            } else {
+                showToast('アップロード完了。文字起こしを開始します。', 'success');
+                startProgress('文字起こし中...', 30);
+                let pct = 30;
+                progressTimer = setInterval(() => {
+                    pct = Math.min(95, pct + 5);
+                    setProgress(pct);
+                }, 5000);
                 setTimeout(async () => {
                     finishProgress();
                     try { await loadMinutesList(); } catch (e) {}
