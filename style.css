@@ -398,7 +398,9 @@ body {
     background: var(--bg-primary);
     border-radius: 12px;
     border: 1px solid var(--border-light);
-    overflow: hidden;
+    /* 横幅が狭い時に見切れないように、基本は横スクロール許可 */
+    overflow-x: auto;
+    overflow-y: hidden;
 }
 
 .table-header {
@@ -585,6 +587,32 @@ body {
     height: 6px;
     border-radius: 50%;
     background: currentColor;
+}
+
+/* タブレット〜スモールPC: サイドバーをオフキャンバスに */
+@media (max-width: 1024px) {
+    .menu-toggle { display: flex; }
+    .sidebar {
+        position: fixed;
+        top: var(--header-height);
+        left: 0;
+        bottom: 0;
+        z-index: 999;
+        transform: translateX(-100%);
+        width: var(--sidebar-width);
+    }
+    .sidebar.open { transform: translateX(0); }
+    .overlay {
+        display: none;
+        position: fixed;
+        top: var(--header-height);
+        left: 0; right: 0; bottom: 0;
+        background: rgba(0, 0, 0, 0.3);
+        z-index: 998;
+    }
+    .overlay.show { display: block; }
+    .content-wrapper { padding: 24px; }
+    .table-container { overflow-x: auto; }
 }
 
 /* モバイル対応 */
