@@ -136,8 +136,11 @@ body {
 /* レイアウト */
 .app-container {
     display: flex;
-    height: 100vh;
+    min-height: 100vh;
     padding-top: var(--header-height);
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden; /* 全体の横スクロールは抑止（個別要素で管理） */
 }
 
 /* サイドバー */
@@ -147,6 +150,7 @@ body {
     border-right: 1px solid var(--border-light);
     overflow-y: auto;
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    flex: 0 0 var(--sidebar-width);
 }
 
 .sidebar-content {
@@ -201,15 +205,17 @@ body {
 
 /* メインコンテンツ */
 .main-content {
-    flex: 1;
+    flex: 1 1 auto;
+    min-width: 0; /* サイドバーと並んだ時のはみ出し防止 */
     overflow-y: auto;
     background: var(--bg-secondary);
 }
 
 .content-wrapper {
+    width: 100%;
     max-width: 1200px;
     margin: 0 auto;
-    padding: 32px;
+    padding: clamp(16px, 2.5vw, 32px);
     display: none;
 }
 
@@ -248,7 +254,7 @@ body {
     background: var(--bg-primary);
     border-radius: 12px;
     border: 1px solid var(--border-light);
-    padding: 48px;
+    padding: clamp(16px, 3vw, 48px);
     text-align: center;
     transition: var(--transition);
 }
@@ -256,7 +262,7 @@ body {
 .upload-dropzone {
     border: 2px dashed var(--border-medium);
     border-radius: 12px;
-    padding: 48px 24px;
+    padding: clamp(16px, 3vw, 48px) clamp(12px, 2vw, 24px);
     cursor: pointer;
     transition: var(--transition);
     background: var(--bg-tertiary);
@@ -532,7 +538,7 @@ body {
 
 .title-text {
     display: inline-block;
-    max-width: 520px;
+    max-width: clamp(200px, 50vw, 520px);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -612,6 +618,32 @@ body {
     }
     .overlay.show { display: block; }
     .content-wrapper { padding: 24px; }
+    .table-container { overflow-x: auto; }
+}
+
+/* タブレット〜スモールPC: サイドバーをオフキャンバスに */
+@media (max-width: 1024px) {
+    .menu-toggle { display: flex; }
+    .sidebar {
+        position: fixed;
+        top: var(--header-height);
+        left: 0;
+        bottom: 0;
+        z-index: 999;
+        transform: translateX(-100%);
+        width: var(--sidebar-width);
+    }
+    .sidebar.open { transform: translateX(0); }
+    .overlay {
+        display: none;
+        position: fixed;
+        top: var(--header-height);
+        left: 0; right: 0; bottom: 0;
+        background: rgba(0, 0, 0, 0.3);
+        z-index: 998;
+    }
+    .overlay.show { display: block; }
+    .content-wrapper { padding: clamp(16px, 3vw, 32px); }
     .table-container { overflow-x: auto; }
 }
 
