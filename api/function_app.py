@@ -16,11 +16,11 @@ from openai import AzureOpenAI
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
-# Define container names
-AUDIO_CONTAINER = "audio"
-TRANSCRIPTS_CONTAINER = "transcripts"
-MINUTES_CONTAINER = "minutes"
-VIDEO_CONTAINER = "video"
+# Define container names (allow override via environment)
+AUDIO_CONTAINER = os.getenv("AUDIO_CONTAINER", "audio")
+TRANSCRIPTS_CONTAINER = os.getenv("TRANSCRIPTS_CONTAINER", "transcripts")
+MINUTES_CONTAINER = os.getenv("MINUTES_CONTAINER", "minutes")
+VIDEO_CONTAINER = os.getenv("VIDEO_CONTAINER", "video")
 
 @app.route(route="upload-sas")
 def get_upload_sas(req: func.HttpRequest) -> func.HttpResponse:
@@ -199,7 +199,8 @@ def upload_http_trigger(req: func.HttpRequest) -> func.HttpResponse:
             json.dumps({
                 'message': f'{"Video" if is_video else "Audio"} file {original_filename} uploaded as {blob_filename}.',
                 'container': dest_container,
-                'name': blob_filename
+                'name': blob_filename,
+                'isVideo': is_video
             }, ensure_ascii=False),
             mimetype="application/json",
             status_code=202 # Accepted
