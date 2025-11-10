@@ -226,21 +226,30 @@ def transcribe_eventgrid_trigger(req: func.HttpRequest) -> func.HttpResponse:
 
             if event_type == 'Microsoft.Storage.BlobCreated':
                 logging.info(f"Processing BlobCreated event for transcription: {event['id']}")
-                
-                blob_url = event['data']['url']
-                source_blob_name = os.path.basename(blob_url)
 
-                # --- Generate SAS token for the source blob ---
+                blob_url = event['data']['url']
+                # Parse full blob path (supports virtual directories e.g., users/{id}/...)
+                parsed = urllib.parse.urlparse(blob_url)
+                try:
+                    audio_blob_name = parsed.path.split(f"/{AUDIO_CONTAINER}/", 1)[1]
+                except Exception:
+                    # Fallback to basename to avoid crash, but log warning
+                    audio_blob_name = os.path.basename(parsed.path)
+                    logging.warning(f"Could not parse full audio blob path from URL; using basename: {audio_blob_name}
+URL: {blob_url}")
+
+                # --- Generate SAS token for the source blob (longer TTL for long audio) ---
                 connect_str = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
                 blob_service_client = BlobServiceClient.from_connection_string(connect_str)
                 
                 sas_token = generate_blob_sas(
                     account_name=blob_service_client.account_name,
                     container_name=AUDIO_CONTAINER,
-                    blob_name=source_blob_name,
+                    blob_name=audio_blob_name,
                     account_key=blob_service_client.credential.account_key,
                     permission=BlobSasPermissions(read=True),
-                    expiry=datetime.utcnow() + timedelta(hours=1) # 1-hour validity
+                    # 12 hours to accommodate long processing queues and 1h+ files
+                    expiry=datetime.utcnow() + timedelta(hours=12)
                 )
                 
                 blob_url_with_sas = f"{blob_url}?{sas_token}"
