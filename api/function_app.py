@@ -88,7 +88,8 @@ def get_upload_sas(req: func.HttpRequest) -> func.HttpResponse:
             blob_name=blob_filename,
             account_key=account_key,
             permission=BlobSasPermissions(create=True, write=True, add=True, read=True),
-            expiry=now + timedelta(minutes=30),
+            # Slow networks or large files can exceed 30 minutes; extend to 3 hours
+            expiry=now + timedelta(hours=3),
             start=now - timedelta(minutes=5)
         )
 

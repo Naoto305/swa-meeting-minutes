@@ -340,11 +340,23 @@ async function handleFileUpload(file) {
                     pct = Math.min(95, pct + 5);
                     setProgress(pct);
                 }, 5000);
-                // 軽めにポーリング
-                setTimeout(async () => {
-                    finishProgress();
-                    try { await loadMinutesList(); } catch (e) {}
-                }, 120000);
+                // 音声でも長時間化に対応して一覧を監視（最大60分）
+                let left = 120; // 30秒 x 120 = 60分
+                const watcher = setInterval(async () => {
+                    try {
+                        const r = await fetch('/api/list-minutes');
+                        const j = await r.json();
+                        const total = (j && typeof j.total === 'number') ? j.total : (Array.isArray(j.minutes)? j.minutes.length : 0);
+                        if (total > currentMinutesTotal) {
+                            await loadMinutesList();
+                            finishProgress(true);
+                            clearInterval(watcher);
+                            showToast('議事録が生成されました', 'success');
+                            return;
+                        }
+                    } catch (e) { /* noop */ }
+                    if (--left <= 0) { clearInterval(watcher); finishProgress(false); }
+                }, 30000);
             }
             await loadMinutesList();
             return; // SAS 成功時はここで終了
@@ -400,10 +412,23 @@ async function handleFileUpload(file) {
                     pct = Math.min(95, pct + 5);
                     setProgress(pct);
                 }, 5000);
-                setTimeout(async () => {
-                    finishProgress();
-                    try { await loadMinutesList(); } catch (e) {}
-                }, 120000);
+                // フォールバック経路でも長時間監視
+                let left = 120;
+                const watcher = setInterval(async () => {
+                    try {
+                        const r = await fetch('/api/list-minutes');
+                        const j = await r.json();
+                        const total = (j && typeof j.total === 'number') ? j.total : (Array.isArray(j.minutes)? j.minutes.length : 0);
+                        if (total > currentMinutesTotal) {
+                            await loadMinutesList();
+                            finishProgress(true);
+                            clearInterval(watcher);
+                            showToast('議事録が生成されました', 'success');
+                            return;
+                        }
+                    } catch (e) { /* noop */ }
+                    if (--left <= 0) { clearInterval(watcher); finishProgress(false); }
+                }, 30000);
             }
             await loadMinutesList();
         } else {
