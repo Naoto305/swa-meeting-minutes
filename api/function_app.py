@@ -1,4 +1,4 @@
-import azure.functions as func
+﻿import azure.functions as func
 import logging
 import json
 import os
@@ -458,22 +458,26 @@ def list_minutes(req: func.HttpRequest) -> func.HttpResponse:
             size = 20
 
         items = []
-        # List only the current user's folder if available; otherwise list all and filter
-        name_prefix = f"users/{current_user_id}/" if current_user_id else None
-        iterator = container.list_blobs(name_starts_with=name_prefix, include=['metadata']) if name_prefix else container.list_blobs(include=['metadata'])
+        # Always list all; filter in code to keep legacy minutes (no users/ prefix) visible
+        iterator = container.list_blobs(include=['metadata'])
         for b in iterator:
             # Only include text files that look like generated minutes
             name = b.name
             if not name.lower().endswith('.txt'):
                 continue
-            # If user filtering is enabled (no prefix path match), filter by metadata as a fallback
-            if current_user_id and name_prefix is None:
-                owner = None
+            # User filtering: include own items and legacy items without explicit owner
+            if current_user_id:
                 try:
-                    owner = (b.metadata or {}).get('user_id') if hasattr(b, 'metadata') else None
+                    meta = getattr(b, 'metadata', None) or {}
                 except Exception:
-                    owner = None
-                if owner and owner != current_user_id:
+                    meta = {}
+                owner = meta.get('user_id')
+                if name.startswith(f"users/{current_user_id}/"):
+                    pass
+                elif owner and owner == current_user_id:
+                    pass
+                elif name.startswith('users/') or owner:
+                    # Owned by someone else -> skip
                     continue
             base = os.path.basename(name)
             job_id = base[:-12] if base.endswith('_minutes.txt') and len(base) > len('_minutes.txt') else os.path.splitext(base)[0]
@@ -1164,5 +1168,7 @@ def translate_minutes(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         logging.error(f"Error in translate-minutes: {e}", exc_info=True)
         return func.HttpResponse("Failed to translate minutes.", status_code=500)
+
+
 
 
