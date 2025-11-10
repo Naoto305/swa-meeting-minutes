@@ -300,7 +300,7 @@ async function handleFileUpload(file) {
                 currentMinutesTotal = (j0 && typeof j0.total === 'number') ? j0.total : 0;
             } catch (e) { currentMinutesTotal = 0; }
 
-            if (result.container === 'video') {
+            if ((result && result.isVideo === true) || (result && result.container === 'video')) {
                 showToast('動画を受け付けました。音声抽出→文字起こしを実行します。', 'info', 6000);
                 startProgress('音声抽出中...');
                 let pct = 10;
@@ -373,7 +373,7 @@ async function handleFileUpload(file) {
                 currentMinutesTotal = (j0 && typeof j0.total === 'number') ? j0.total : 0;
             } catch (e) { currentMinutesTotal = 0; }
 
-            if (result.container === 'video') {
+            if ((result && result.isVideo === true) || (result && result.container === 'video')) {
                 showToast('動画を受け付けました。音声抽出→文字起こしを実行します。', 'info', 6000);
                 startProgress('音声抽出中...');
                 let pct = 10;
