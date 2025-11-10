@@ -173,15 +173,8 @@ async function uploadBlobChunked(uploadUrl, file, options = {}) {
     // Put Block List でコミット（ここで Content-Type / metadata を設定）
     const xml = `<?xml version="1.0" encoding="utf-8"?>\n<BlockList>\n${blockIds.map(id => `  <Latest>${id}</Latest>`).join('\n')}\n</BlockList>`;
     const commitHeaders = new Headers({ 'Content-Type': 'application/xml' });
-    // Content-Type 反映
-    const contentType = lower['x-ms-blob-content-type'] || lower['content-type'] || (file.type || 'application/octet-stream');
-    commitHeaders.set('x-ms-blob-content-type', contentType);
-    // メタデータ反映（x-ms-meta-* -> key:value）
-    for (const [k, v] of Object.entries(lower)) {
-        if (k.startsWith('x-ms-meta-')) {
-            commitHeaders.set(k, v);
-        }
-    }
+    // CORS起因の失敗を避けるため、ここでは Content-Type/metadata の追加ヘッダは送らない
+    // （後段のサーバー側で不足メタデータは補完される設計）
     const commitUrl = mkUrl('comp=blocklist');
     const commitResp = await fetch(commitUrl, { method: 'PUT', headers: commitHeaders, body: xml });
     if (!commitResp.ok) {
