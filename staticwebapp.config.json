@@ -3,6 +3,7 @@
     {
       "route": "/api/list-minutes",
       "allowedRoles": [
+        "anonymous",
         "authenticated"
       ]
     },
